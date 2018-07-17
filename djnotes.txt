@@ -1,0 +1,101 @@
+PIC compilers for Ubuntu:
+http://www.theengineeringprojects.com/2016/02/pic-c-compiler.html
+https://electronics.stackexchange.com/questions/18821/compiler-assembler-toolchain-for-pic-micros-using-ubuntu-11-04
+
+MPLAB-X (Java):
+http://ww1.microchip.com/downloads/mplab/X_Beta/installer.html
+
+SDCC:
+https://hackaday.com/2010/11/03/how-to-program-pics-using-linux/
+http://sdcc.sourceforge.net/
+"apt-cache policy sdcc" shows 3.5.0 as of 7/29/17
+6/12/16 = 3.6.0
+6/24/15 = 3.5.0
+
+download source:
+https://sourceforge.net/projects/sdcc/files/
+bin:
+https://sourceforge.net/projects/sdcc/files/sdcc-linux-x86/3.6.0/sdcc-3.6.0-i386-unknown-linux2.5.tar.bz2/download
+  unpack; cd
+  (INSTALL.txt)
+  sudo  cp -r * /usr/local
+  sdcc -v
+  sdcc --print-search-dirs
+BROKEN: src:
+https://sourceforge.net/projects/sdcc/files/sdcc/3.6.0/sdcc-src-3.6.0.tar.bz2/download
+  cd *src
+  sudo apt-get install bison flex libboost-dev gputils
+  ./configure
+  make
+  sudo make install
+sdcc/src/sdcc-code/sdcc/device/non-free/include/pic14/p‌​ic16f887.h
+
+Node.js versions:
+https://nodejs.org/en/download/releases/
+
+MPLAB:
+http%3A%2F%2Fwww.microchip.com%2F&title=Top%203%20PIC%20C%20Compiler%20-%20The%20Engineering%20Projects&txt=official%20site
+
+PIC pgming on Linux:
+lsusb
+https://www.digitalpeer.com/blog/programming-a-pic-on-linux-tutorial
+git clone https://github.com/psmay/pk2cmd.git
+maybe:
+http://www.thebitbangtheory.com/2011/10/how-to-setup-pic-microcontroller-development-environment-ubuntu-11-10-oneiric-ocelot-piklab-sdcc/
+
+https://www.auelectronics.com/Q3.htm
+http://ww1.microchip.com/downloads/en/DeviceDoc/PICkit%202%20v2.61.00%20Setup%20A.zip   (run setup.exe not .msi with wine)
+http://ww1.microchip.com/downloads/en/DeviceDoc/PICkit%202%20v2.61.00%20Setup%20dotNET%20A.zip  (includes .NET)
+
+PICKit 2 source:
+http://ww1.microchip.com/downloads/en/DeviceDoc/PICkit2_PK2CMD_WIN32_SourceV1-21_RC1.zip
+dev file:
+http://www.microchip.com/forums/download.axd?file=0;749972
+
+Device File editor:
+https://sites.google.com/site/pk2devicefileeditor/
+
+http://curuxa.org/en/Program_PICs_with_a_PICkit2_using_the_command_line_on_Linux
+pk2cmd -B/usr/share/pk2/ -PPIC16F688 -Fbuild/EscapePhone.HEX -M
+pk2cmd -S
+connect, detect: pk2cmd -P
+run code:  pk2cmd -PPIC16F88 [-A4] -T       A=voltage 4, 3, 2.5, etc.
+cut power:  pk2cmd -PPIC16F88 -A0
+pgm:  pk2cmd -PPIC16F88 -M [-E] -Ffile.hex                 E=erase     M=pgm  Y=verify
+verify: pk2cmd -B/usr/share/pk2/ -PPIC16F688 -Y -Ffile.hex
+list devices: pk2cmd -B/usr/share/pk2/ -?P
+stop/reset: pk2cmd -PPIC16F688 -R
+auto-detect:  pk2cmd -p -i
+version: pk2cmd -?v
+
+other:
+GPASM
+Anjuta (IDE)
+
+DTMF tones/freq:
+https://www.mediacollege.com/audio/tone/dtmf.html
+
+pre-rec alpha num mp3:
+http://www.theblog.ca/mp3-audio-files-alphabet
+
+DFPlayer tutorial:
+noise: https://www.dfrobot.com/forum/viewtopic.php?t=3154
+https://www.dfrobot.com/blog-277.html
+*Important note for audio files. Careful read notes below will save you a lot of precious time!
+- DFPlayer Mini read both MP3 and WAV files.
+- All audio files must be placed under /mp3 folder.
+- Audio file must be named 0001.mp3, 0002.mp3.....0255.mp3 (4 letters not 2 or 3 letters)
+- Audio file names can have any characters after 4 digits, such as 0001_Bruno_Mars_Count_On Me.mp3 
+- Tested few under 1 second WAV files and they did not work
+- If one of the audio file is removed from SD cared, DFPlayer still can find it and play it! Weird! In the end, I formatted the SD card to make DFPlayer to play the music I specified.
+- Delay(seconds); You have to specify number of seconds delay for the audio file to play completely or the next audio file might be started before current audio is over!
+- mp3_play (74); means play audio file 0074.mp3
+other sample code:
+https://www.dfrobot.com/wiki/index.php/DFPlayer_Mini_SKU:DFR0299
+
+elctromechanical puzzle box:
+https://www.youtube.com/watch?v=6HKQTuVD2ac
+(fader motors)
+
+puzzle box:
+https://www.youtube.com/watch?v=ibUV-bxcCZA
