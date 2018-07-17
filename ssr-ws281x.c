@@ -115,6 +115,25 @@
 /// Pin assignments:
 //
 
+//PIC16F1825 has 12 I/O pins, but 4 are needed for SPI data recovery which leaves only 7 pins for SSR control
+//could have used an inverter (comparator) and USART, but that requires sender encoding to compensate for start/stop bits
+//could have used a PIC12F1840 to recover SPI signal and PIC16F1825 for SSR channel control, but that's an extra IC
+//I wanted 8 pins for SSR control (allowing 8x7 chipiplexing) and a single IC, so I used a PIC16F1827 instead
+
+//PIC16F1827 pin-out/wiring:
+//                  +----U----+
+//             ch 2 | A2   A1 | ch 1
+//             ch 3 | A3   A0 | ch 0
+//             ch 4 | A4   A7 | ch 7
+//           ZC/VPP | A5   A6 | ch 6
+//              GND |VSS   VDD| +5V
+// WS281X ----> T1G | B0   B7 | ICMP DAT
+//        `---> SDI | B1   B6 | ICMP CLK
+// LEDs <--- fr pan | B2   B5 | ch 5
+//        +--- CCP1 | B3   B4 | SCLK <--+
+//        |         +---------+         | (0.5 usec delay)
+//        +-----------------------------+
+
 //8 dedicated or chipiplexed channels:
 #define CH0_PIN  RA0
 #define _CH0_PIN  0xA0
