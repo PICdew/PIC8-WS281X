@@ -88,7 +88,7 @@ function asm_cleanup()
         if (parts = buf.match(/^([a-z0-9_]+)(\s+code)(\s+0x[0-9a-f]+)?\s*(;.*)?$/i)) //rewrite code seg as label + org
         {
             if (!parts[3]) { if (!keep.reloc) parts[3] = "0x400"; keep.reloc = true; } //kludge: reloc away from startup vector first time
-            if (parts[3]) { this.push(`\torg ${parts[3]} ;;C1 ${buf}\n`); buf = buf.replace(parts[3], ""); }
+            if (parts[3]) { this.push(`\torg ${parts[3]} ;;C1 ${buf}\n`); buf = buf.replace(parts[3], ""); keep.reloc = true; }
             buf = parts[1] + ":" + (parts[4] || "");
         }
         buf = buf.replace(/;id=\d+,.*$/i, ""); //TODO: is there useful info in here?
@@ -271,7 +271,7 @@ function asm_optimize()
 //                return;
 //            }
 //            if (typeof all.init == "undefined") //kludge: SDCC can put other code ahead of startup; need to relocate it
-//            {
+//            {org 0x40
 //                all[inx] = "\torg 0x400 ;;G5 reloc pre-startup code\n" + all[inx];
 //                all.init = false;
 //                //continue parsing

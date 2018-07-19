@@ -69,13 +69,13 @@
 //- SDCC better bank select optimization (track entry/exit banks)
 //- U16FIXUP not needed with UL? (clock consts)
 
-//#define CLOCK_FREQ  (32 MHz) //max osc freq (with PLL); PIC will use int osc if ext clock is absent
-#define CLOCK_FREQ  (4 MHz) //1 MIPS
+#define CLOCK_FREQ  (32 MHz) //8 MIPS; max osc freq (with PLL); PIC will use int osc if ext clock is absent
+//#define CLOCK_FREQ  (4 MHz) //1 MIPS
 //#define CLOCK_FREQ  18432000 //20 MHz is max ext clock freq for older PICs; comment this out to run at max int osc freq; PIC will use int osc if ext clock is absent
 //#define Timer0_range  (100 usec)
 //#define Timer1_halfRange  (50 msec/2) //kludge: BoostC gets /0 error with 50 msec (probably 16-bit arith overflow), so use a smaller value
 //receive at 5/6 WS281X bit rate (which is 800 KHz); this gives 2 bytes per WS281X node (8 data bits + 1 start/stop bit per byte)
-#define BAUD_RATE  9600 //(8 MHz / 12) ///10 * 5/6) //no-needs to be a little faster than 3x WS281X data rate (2.4 MHz), or a multiple of it; this is just about the limit for an 8 MIPS PIC16X
+//#define BAUD_RATE  9600 //(8 MHz / 12) ///10 * 5/6) //no-needs to be a little faster than 3x WS281X data rate (2.4 MHz), or a multiple of it; this is just about the limit for an 8 MIPS PIC16X
 // 2/3 Mbps => 15 usec/char; can rcv 2 bytes/WS281X node
 //#define BAUD_RATE  (10 MHz) //needs to align with visual bit-banging from GPU; //be a little faster than 3x WS281X data rate (2.4 MHz); this is just about the limit for an 8 MIPS PIC16X
 //#define REJECT_FRERRS //don't process frame errors (corrupted data could mess up display)
@@ -86,7 +86,7 @@
 //#define debug  //include compile-time value checking
 
 //include compile-time value checking:
-#define WANT_FRPAN //display status/debug info on "front panel" made of WS281X LEDs
+#define WANT_FRPAN //display debug/status info on "front panel" made of 24 WS281X LEDs
 #define CALIBRATE_TIMER
 //#define SERIAL_DEBUG
 //#define TIMER1_DEBUG
@@ -103,7 +103,8 @@
 #include "config.h"
 //#include "timer_dim.h"
 //#include "timer_50msec.h"
-#include "timer_msec.h"
+//#include "timer_msec.h"
+#include "timers.h"
 //#include "wdt.h" //TODO?
 //#include "serial.h"
 //#include "zc.h"
@@ -232,7 +233,7 @@
 //set front panel/debug pin to Output:
     TRISA &= ~Abits(FRPAN_MASK);
     TRISBC &= ~BCbits(FRPAN_MASK);
-	init(); //do other init after Ports (to minimize side effects on external circuits); NOTE: no race condition occur with cooperative event handling (no interrupts)
+	init(); //do other init *after* TRIS init (to minimize side effects on external circuits); NOTE: no race conditions occur with cooperative event handling (no interrupts)
 }
  #undef init
  #define init()  frpan_init() //event handler function chain
@@ -246,21 +247,28 @@
 
 #ifdef CALIBRATE_TIMER
 //NOTE: uses port_init() defined above
-#define LED_PIN  FRPAN_PIN
+ #define LED_PIN  FRPAN_PIN
 //#define _LED_PIN  _BUSY_PIN
 //#define LED_MASK  BUSY_MASK //PORTMAP16(_LED_PIN)
 
 //toggle LED @1 Hz:
 //tests clock timing and overall hardware
-INLINE void led_1sec(void)
-{
+ INLINE void calibrate_init(void)
+ {
 //	on_tmr_1sec(); //prev event handlers first
-    wait(1 sec);
-	if (LED_PIN) LED_PIN = 0;
-    else LED_PIN = 1;
-}
-#undef on_tmr_1sec
-#define on_tmr_1sec()  led_1sec() //event handler function chain
+//    wait(1 sec);
+    for (;;)
+    {
+        wait(1 sec);
+        if (LED_PIN) LED_PIN = 0;
+        else LED_PIN = 1;
+        if (NEVER) break; //avoid "unreachable code" warning
+    }
+ }
+// #undef on_tmr_1sec
+// #define on_tmr_1sec()  led_1sec() //event handler function chain
+ #undef init
+ #define init()  calibrate_init() //event handler function chain
 #endif //def CALIBRATE_TIMER
 
 
@@ -269,7 +277,11 @@ INLINE void led_1sec(void)
 /// Main logic:
 //
 
-#include "func_chains.h" //finalize function chains; NOTE: this adds call/return/banksel overhead, but makes debug easier
+//#include "func_chains.h" //finalize function chains; NOTE: this adds call/return/banksel overhead, but makes debug easier
+inline void eventh()
+{
+}
+
 
 //init + evt handler loop:
 void main(void)
@@ -277,15 +289,14 @@ void main(void)
 //no    NUMBANKS(2); //reduce banksel overhead
 //	ONPAGE(LEAST_PAGE); //put code where it will fit with no page selects
 //    test();
-    debug(); //incl debug info (not executable)
+    debug(); //incl debug info
 	init(); //1-time set up of control regs, memory, etc.
-    for (;;) //poll for events
+    for (;; eventh()) //main loop; needs to call event handler periodically
     {
 //        --PCL;
 //        on_tmr_dim();
 //        on_tmr_50msec(); //CAUTION: must come before tmr_1sec()
 //        on_tmr_1sec();
-        events();
 //        on_tmr_1msec(); //elapsed time counter (msec); TODO: move to yield()?
 //these should probably come last (they use above timers):
 //        on_rx();

@@ -3,8 +3,8 @@
 /// Timer1
 //
 
-#ifndef _TIMER_MSEC_H
-#define _TIMER_MSEC_H
+#ifndef _TIMER_50MSEC_H
+#define _TIMER_50MSEC_H
 
 #include "compiler.h" //device registers
 #include "helpers.h" //U16FIXUP(), RED_MSG, IIF(), NumBits(), TOSTR()
@@ -12,7 +12,7 @@
 
 
 #ifndef Timer1_Range
- #define Timer1_Range  (50UL msec)
+ #define Timer1_Range  (50 msec)
 #endif
 //#define Timer1_halfRange  (Timer1_Range / 2) //kludge: BoostC gets /0 error with 50 msec (probably 16-bit arith overflow), so use a smaller value
 //#define Timer1_8thRange  (Timer1_Range / 8) //kludge: BoostC gets /0 error with 50 msec (probably 16-bit arith overflow), so use a smaller value
@@ -27,7 +27,7 @@
 
 
 //kludge: use trial & error to select prescalar:
-#define Timer1_Prescalar  1UL
+#define Timer1_Prescalar  1
 #if Timer1_Limit < 1
  #warning RED_MSG "[ERROR] Timer1 limit arithmetic bad" TOSTR(Timer1_Limit)
 #endif
@@ -38,19 +38,19 @@
 //#if Timer1_halfLimit < 0
 // #warning YELLOW_MSG "[WARNING] BoostC arithmetic overflow, trying work-around"
 //#endif
-#if Timer1_Limit < Timer1_Range //U16FIXUP(Timer1_Range)
+#if Timer1_Limit < U16FIXUP(Timer1_Range)
  #undef Timer1_Prescalar
- #define Timer1_Prescalar  2UL
+ #define Timer1_Prescalar  2
 // #warning BLUE_MSG "T1 limit @ "Timer1_Prescalar" 2 ps = "Timer1_halfLimit""
- #if Timer1_Limit < Timer1_Range //U16FIXUP(Timer1_Range)
+ #if Timer1_Limit < U16FIXUP(Timer1_Range)
   #undef Timer1_Prescalar
-  #define Timer1_Prescalar  4UL
+  #define Timer1_Prescalar  4
 //  #warning BLUE_MSG "T1 limit @ "Timer1_Prescalar" 4 ps = "Timer1_halfLimit""
-  #if Timer1_Limit < Timer1_Range //U16FIXUP(Timer1_Range)
+  #if Timer1_Limit < U16FIXUP(Timer1_Range)
    #undef Timer1_Prescalar
-   #define Timer1_Prescalar  8UL
+   #define Timer1_Prescalar  8
 //   #warning BLUE_MSG "T1 limit @ "Timer1_Prescalar" 8 ps = "Timer1_halfLimit""
-   #if Timer1_Limit < Timer1_Range //U16FIXUP(Timer1_Range) //exceeded max prescalar here
+   #if Timer1_Limit < U16FIXUP(Timer1_Range) //exceeded max prescalar here
     #error RED_MSG "[ERROR] Can't find a Timer1 prescalar to give " TOSTR(U16FIXUP(Timer1_Range)) " usec range; limit was " TOSTR(Timer1_Limit)""
    #endif
   #endif
@@ -107,9 +107,7 @@
 //#warning TOSTR(TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ))
 //#define TMR1_PRESET_50msec  (2 * TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ))
 #define TMR1_PRESET_50msec  TimerPreset(U16FIXUP(50 msec), 8, Timer1, CLOCK_FREQ)
-#warning BLUE_MSG "timer1 50 msec preset" TOSTR(TMR1_PRESET_50msec)
-#define TMR1_PRESET_1msec  TimerPreset(/*U16FIXUP(1 msec)*/ 1UL msec, 8, Timer1, CLOCK_FREQ)
-#warning BLUE_MSG "timer1 1 msec preset" TOSTR(TMR1_PRESET_1msec)
+#warning BLUE_MSG "timer1 preset" TOSTR(TMR1_PRESET_50msec)
 //with 8:1 prescalar, Timer 1 interval is 1 usec @ 8 MIPS, preset for 50 msec tick == 50,000 == 0x3cb0
 
 
@@ -155,20 +153,13 @@
 
 //restart current timer interval:
 //NOTE: fractional interval will be lost
-#if 0
 INLINE void TMR1_reset()
 {
 //	if (relative) TMR0 += Timer0_Preset; 
     TMR1_16 = U16FIXUP(TMR1_PRESET_50msec); //avoid overflow; / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-    TMR1_16 = /*U16FIXUP*/ (TMR1_PRESET_1msec); //avoid overflow; / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
     TMR1IF = FALSE; //prevent false trigger first time; NOTE: data sheets say this must be cleared in software
 }
-#endif
 
-
-//volatile NONBANKED uint2x8_t elapsed_msec;
-volatile NONBANKED uint8_t elapsed_msecL;
-volatile NONBANKED uint8_t elapsed_msecH;
 
 #ifndef init
  #define init() //initialize function chain
@@ -184,11 +175,8 @@ INLINE void init_tmr1(void)
 //    TMR1L = TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ) % 0x100; // / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
 //    TMR1H = TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ) / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
 //    TMR1IF = FALSE; //prevent false trigger first time; NOTE: data sheets say this must be cleared in software
-//    reset(TMR1);
-    TMR1_16 = 1; //wrap immediately so caller's event handler will initialize
+    reset(TMR1);
 	T1CON = MY_T1CON(CLOCK_FREQ / PLL); //configure + turn on Timer 1; should be 0x21 for 1:4 prescalar
-//    elapsed_msec.as_uint16 = 0;
-    elapsed_msecL = elapsed_msecH = 0;
 //    loop_1sec = TMR1_LOOP_1sec;
 }
 #undef init
@@ -224,83 +212,5 @@ INLINE void on_tmr_50msec_tick(void)
 #define on_tmr_50msec()  on_tmr_50msec_tick() //event handler function chain
 
 
-#ifndef on_tmr_1msec
- #define on_tmr_1msec() //initialize function chain
-#endif
-
-//NOTE: need macros here so "return" will exit caller
-#define on_tmr_1msec_check()  if (!TMR1IF) return
-
-INLINE void on_tmr_1msec_tick(void)
-{
-	on_tmr_1msec(); //prev event handlers first
-    LABDCL(0x10);
-	/*t1con.*/ TMR1ON = FALSE; /*for cumulative intervals, can't use Microchip workaround and must set low byte first, but then need a temp for _WREG variant; just disable timer during update for simplicity*/
-//	WREG = TimerPreset(duration, IIF(time_base, 8, 6), which, CLOCK_FREQ) / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-//	if (time_base) tmr1H /*op_##time_base*/ += WREG; else tmr1H = WREG;
-//SDCC uses temps here, so use explicit opcodes:
-//    TMR1_16 += TMR1_PRESET_50msec; // / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-//    TMR1L += TMR1_PRESET_50msec % 0x100;
-    WREG = TMR1_PRESET_1msec % 0x100; addwf(ASMREG(TMR1L)); //should be ~ 65536 - 50000 == 0x3cb0 with 8:1 pre @ 8 MIPS
-    WREG = U16FIXUP(TMR1_PRESET_1msec) / 0x100; addwfc(ASMREG(TMR1H));
-//    TMR1L += TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ) % 0x100; // / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-//    if (CARRY) ++TMR1H;
-//    TMR1H += TimerPreset(50 msec / 2, 8, Timer1, CLOCK_FREQ) / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-    TMR1IF = FALSE; //NOTE: data sheets say this must be cleared in software
-	/*T1CON.*/ TMR1ON = TRUE; /*for cumulative intervals, can't use Microchip workaround and must set low byte first, but then need a temp for _WREG variant; just disable timer during update for simplicity*/
-//sdcc bad code:    ++elapsed_msec.as_uint16;
-//sdcc bad code:    if (!++elapsed_msec.low) ++elapsed_msec.high;
-    ++elapsed_msecL;
-    if (ZERO) ++elapsed_msecH;
-}
-#undef on_tmr_1msec
-#define on_tmr_1msec()  on_tmr_1msec_tick() //event handler function chain
-
-
-//wait for Timer 1 to wrap:
-//idler() can do other work while waiting
-#define wait4tmr1(delay_usec, idler, cumulative)  \
-{ \
-    /*TODO: if (cumulative) TMR1_16 += preset; //for better total accuaracy*/ \
-    TMR1_16 = TimerPreset(/*U16FIXUP(1 msec)*/ delay_usec, 8, Timer1, CLOCK_FREQ); /*start with fresh interval*/ \
-    TMR1IF = FALSE; /*prevent false trigger first time; NOTE: data sheets say this must be cleared in software*/ \
-    while (!TMR1IF) idler; \
-}
-
-
-//wait specified #msec:
-//NOTE: msec should be a const so preset can be calculated at compile time rather than run time!
-//    TMR1_16 = U16FIXUP(TMR1_PRESET_1msec); //avoid overflow; / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-#define wait(...)  USE_ARG3(__VA_ARGS__, wait_2ARGS, wait_1ARG) (__VA_ARGS__)
-#define wait_1ARG(duration)  wait_2ARGS(duration, ) //just busy wait; TODO: yield()?
-void error(const char* msg); //dummy ref to get past first pass
-//TODO: fix "unreachable code" warnings below:
-#define wait_2ARGS(duration, idler)  \
-{ \
-    if (duration < Timer1_Limit) { wait4tmr1(duration, idler, false); } /*no loop needed*/ \
-    else if (duration < 256 * Timer1_Limit) /*8-bit loop on Timer 1 (~max 16 sec)*/ \
-    { \
-		volatile BANK0 uint8_t delay_loop8 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
-		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
-		{ \
-            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
-            if (--delay_loop8) continue; /*NOTE: decfsz does NOT set status.Z*/ \
-			break; \
-		} \
-	} \
-    else if (duration < 256 * 256 * Timer1_Limit) /*16-bit loop on Timer 1 (max ~ 1 hr)*/ \
-    { \
-		volatile BANK0 uint16_t delay_loop16 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
-		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
-		{ \
-            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
-            if (--delay_loop16) continue; /*NOTE: decfsz does NOT set status.Z*/ \
-			break; \
-		} \
-	} \
-    else error("out of range"); \
-}
-
-
-#endif //ndef _TIMER_MSEC_H
+#endif //ndef _TIMER_50MSEC_H
 //eof

@@ -61,19 +61,6 @@
 #endif //def on_tmr_dim
 
 
-#if 0 //def on_tmr_50msec
- #include "timer_50msec.h" //ensure all dependent defs
-//wrap with non-inline function for easier debug:
- non_inline void on_tmr_50msec_wrapper(void)
- {
-	ONPAGE(LEAST_PAGE); //put code where it will fit with no page selects
-    on_tmr_50msec_check(); //check if event should be triggered
-	on_tmr_50msec(); //chain prev evt handlers
- }
- #undef on_tmr_50msec
- #define on_tmr_50msec()  on_tmr_50msec_wrapper() //function chain
-#endif //def on_tmr_50msec
-
 #ifdef on_tmr_1msec
  #include "timer_msec.h" //ensure all dependent defs
 //wrap with non-inline function for easier debug:
@@ -85,6 +72,20 @@
  }
  #undef on_tmr_1msec
  #define on_tmr_1msec()  on_tmr_1msec_wrapper() //function chain
+#endif //def on_tmr_50msec
+
+
+#ifdef on_tmr_50msec
+ #include "timer_msec.h" //ensure all dependent defs
+//wrap with non-inline function for easier debug:
+ non_inline void on_tmr_50msec_wrapper(void)
+ {
+	ONPAGE(LEAST_PAGE); //put code where it will fit with no page selects
+    on_tmr_50msec_check(); //check if event should be triggered
+	on_tmr_50msec(); //chain prev evt handlers
+ }
+ #undef on_tmr_50msec
+ #define on_tmr_50msec()  on_tmr_50msec_wrapper() //function chain
 #endif //def on_tmr_50msec
 
 
