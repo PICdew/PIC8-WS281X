@@ -1,48 +1,10 @@
 #ifndef _TIMERS_H
 #define _TIMERS_H
 
+#include "config.h" //in case not already included
 #include "compiler.h" //device registers
 #include "helpers.h" //U16FIXUP(), RED_MSG, IIF(), NumBits(), TOSTR()
 #include "clock.h" //Instr2uSec()
-
-
-////////////////////////////////////////////////////////////////////////////////
-////
-/// Generic timer logic:
-//
-
-//wait specified #usec:
-//NOTE: duration should be a const so preset can be calculated at compile time rather than run time!
-//    TMR1_16 = U16FIXUP(TMR1_PRESET_1msec); //avoid overflow; / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
-#define wait(...)  USE_ARG4(__VA_ARGS__, wait_3ARGS, wait_2ARGS, wait_1ARG) (__VA_ARGS__)
-#define wait_1ARG(duration)  wait_2ARGS(duration, ) //just busy wait; TODO: yield()?
-void error(const char* msg); //dummy ref to get past first pass
-//TODO: fix "unreachable code" warnings below:
-#define wait_2ARGS(duration, idler)  \
-{ \
-    if (duration < Timer1_Limit) { wait4tmr1(duration, idler, false); } /*no loop needed*/ \
-    else if (duration < 256 * Timer1_Limit) /*8-bit loop on Timer 1 (~max 16 sec)*/ \
-    { \
-		volatile BANK0 uint8_t delay_loop8 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
-		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
-		{ \
-            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
-            if (--delay_loop8) continue; /*NOTE: decfsz does NOT set status.Z*/ \
-			break; \
-		} \
-	} \
-    else if (duration < 256 * 256 * Timer1_Limit) /*16-bit loop on Timer 1 (max ~ 1 hr)*/ \
-    { \
-		volatile BANK0 uint16_t delay_loop16 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
-		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
-		{ \
-            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
-            if (--delay_loop16) continue; /*NOTE: decfsz does NOT set status.Z*/ \
-			break; \
-		} \
-	} \
-    else error("out of range"); \
-}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,7 +13,7 @@ void error(const char* msg); //dummy ref to get past first pass
 //
 
 #ifndef Timer0_range
- #define Timer0_range  (100UL usec)
+ #define Timer0_range  (100UL usec) //want Timer 0 to be able to reach this
 #endif
 
 #define TMR0_TICKS(usec)  (0 - TimerPreset(usec, 0, Timer0, CLOCK_FREQ))
@@ -69,7 +31,7 @@ void error(const char* msg); //dummy ref to get past first pass
 #if Timer0_Limit < 1
  #warning RED_MSG "[ERROR] Timer0 limit arithmetic bad" TOSTR(Timer0_Limit)
 #endif
-#if Timer0_Limit < Timer0_range
+#if Timer0_Limit < Timer0_range //out of range; use larger prescalar
  #undef Timer0_Prescalar
  #define Timer0_Prescalar  2UL
  #if Timer0_Limit < Timer0_range
@@ -132,14 +94,14 @@ void error(const char* msg); //dummy ref to get past first pass
 	| IIFNZ(FALSE, /*1<<NOT_WPUEN*/ _NOT_WPUEN) /*;enable weak pull-ups on PORTA (needed to pull ZC high when open); might mess up charlieplexing, so turn off for other pins*/ \
 	| IIFNZ(DONT_CARE, /*1<<T0SE*/ _T0SE) /*;Timer 0 source edge: don't care*/ \
 	| IIFNZ(DONT_CARE, /*1<<INTEDG*/ _INTEDG) /*;Ext interrupt not used*/ \
-	| IIFNZ(FALSE, /*1<<PSA*/ _PSA) /*;FALSE => pre-scalar assigned to timer 0, TRUE => WDT*/ \
+	| IIFNZ(Timer0_Prescalar < 2, /*1<<PSA*/ _PSA) /*;FALSE => pre-scalar assigned to timer 0, TRUE => WDT*/ \
 	| IIFNZ(FALSE, /*1<<T0CS*/ _T0CS) /*FALSE: Timer 0 clock source = (FOSC/4), TRUE: T0CKI pin*/ \
-	| ((NumBits8(Timer0_Prescalar) - 2) /*<< PS0*/ * _PS0) /*;prescalar value log2*/ \
+	| (MAX(NumBits8(Timer0_Prescalar) - 2, 0) /*<< PS0*/ * _PS0) /*;prescalar value log2*/ \
 )
 
 
 #ifndef NUMSLOTS
- #define NUMSLOTS  256
+ #define NUMSLOTS  256UL
 #endif
 
 //Timer 0 presets:
@@ -274,7 +236,7 @@ INLINE void on_tmr_1sec_dim_preset(void)
 //
 
 #ifndef Timer1_Range
- #define Timer1_Range  (50UL msec)
+ #define Timer1_Range  (50UL msec) //want Timer 1 to be able to reach this
 #endif
 //#define Timer1_halfRange  (Timer1_Range / 2) //kludge: BoostC gets /0 error with 50 msec (probably 16-bit arith overflow), so use a smaller value
 //#define Timer1_8thRange  (Timer1_Range / 8) //kludge: BoostC gets /0 error with 50 msec (probably 16-bit arith overflow), so use a smaller value
@@ -537,6 +499,45 @@ INLINE void on_tmr_1msec_tick(void)
 }
 #undef on_tmr_1msec
 #define on_tmr_1msec()  on_tmr_1msec_tick() //event handler function chain
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
+/// Generic timer logic:
+//
+
+//wait specified #usec:
+//NOTE: duration should be a const so preset can be calculated at compile time rather than run time!
+//    TMR1_16 = U16FIXUP(TMR1_PRESET_1msec); //avoid overflow; / 0x100; /*BoostC sets LSB first, which might wrap while setting MSB; explicitly set LSB first here to avoid premature wrap*/
+#define wait(...)  USE_ARG4(__VA_ARGS__, wait_3ARGS, wait_2ARGS, wait_1ARG) (__VA_ARGS__)
+#define wait_1ARG(duration)  wait_2ARGS(duration, ) //just busy wait; TODO: yield()?
+void error(const char* msg); //dummy ref to get past first pass
+//TODO: fix "unreachable code" warnings below:
+#define wait_2ARGS(duration, idler)  \
+{ \
+    if (duration < Timer1_Limit) { wait4tmr1(duration, idler, false); } /*no loop needed*/ \
+    else if (duration < 256 * Timer1_Limit) /*8-bit loop on Timer 1 (~max 16 sec)*/ \
+    { \
+		volatile BANK0 uint8_t delay_loop8 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
+		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
+		{ \
+            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
+            if (--delay_loop8) continue; /*NOTE: decfsz does NOT set status.Z*/ \
+			break; \
+		} \
+	} \
+    else if (duration < 256 * 256 * Timer1_Limit) /*16-bit loop on Timer 1 (max ~ 1 hr)*/ \
+    { \
+		volatile BANK0 uint16_t delay_loop16 = divup(duration, Timer1_Limit); /*TMR1 is in Bank 0, so put loop counter there also*/ \
+		for (;;) /*NOTE: cumulative timer will compensate for idler overrun during next timer cycle*/ \
+		{ \
+            wait4tmr1(rdiv(duration, divup(duration, Timer1_Limit)), idler, true); \
+            if (--delay_loop16) continue; /*NOTE: decfsz does NOT set status.Z*/ \
+			break; \
+		} \
+	} \
+    else error("out of range"); \
+}
 
 
 #endif //ndef _TIMERS_H

@@ -345,5 +345,10 @@ INLINE void hexchar_WREG()
 #define BCbits(bits16)  ((bits16) & 0xff) //& PORTBC_MASK
 
 
+//allow PORT and TRIS to be indexed by port#:
+volatile __at(PORTA_ADDR - 0xA) uint8_t PORT[0xF - 0xA + 1]; //A - F (subject to device)
+volatile __at(TRISA_ADDR - 0xA) uint8_t TRIS[0xF - 0xA + 1];
+
+
 #endif //ndef _HELPERS_H
 //EOF

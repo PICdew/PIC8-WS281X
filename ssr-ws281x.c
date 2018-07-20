@@ -100,7 +100,7 @@
 //#include "helpers.h"
 //#include "compiler.h"
 //#include "clock.h" //override default clock rate
-#include "config.h"
+//#include "config.h"
 //#include "timer_dim.h"
 //#include "timer_50msec.h"
 //#include "timer_msec.h"
@@ -231,8 +231,10 @@
  {
 //    init(); //other init first
 //set front panel/debug pin to Output:
-    TRISA &= ~Abits(FRPAN_MASK);
-    TRISBC &= ~BCbits(FRPAN_MASK);
+//    TRISA &= ~Abits(FRPAN_MASK); //set front panel pin to Output
+//    TRISBC &= ~BCbits(FRPAN_MASK);
+    TRIS[PORTOF(_FRPAN_PIN) >> 4] &= ~ 1 << PINOF(_FRPAN_PIN);
+    TRIS[0xA] &= ~ 4; //debug
 	init(); //do other init *after* TRIS init (to minimize side effects on external circuits); NOTE: no race conditions occur with cooperative event handling (no interrupts)
 }
  #undef init
