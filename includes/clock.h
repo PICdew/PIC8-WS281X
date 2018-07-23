@@ -10,7 +10,8 @@
 
 
 //convenience macros (for readability):
-//CAUTION: might need parentheses, depending on usage
+//CAUTION: force UL arithmetic to avoid precision errors
+//NOTE: caller might need parentheses, depending on usage
 #define usec
 #define msec  *1000UL
 #define sec  *1000000UL
@@ -23,8 +24,8 @@
 //;NOTE: these require 32-bit arithmetic.
 //Calculations are exact for small numbers, but might wrap or round for larger numbers (needs 32-bit arithmetic at compile time).
 //;misc timing consts:
-#define ONE_MSEC  (1 msec) //1000
-#define ONE_SEC  (1 sec) //1000000
+//#define ONE_MSEC  (1 msec) //1000
+//#define ONE_SEC  (1 sec) //1000000
 //#define MHz(clock)  ((clock)/ONE_SEC)
 
 
@@ -65,35 +66,6 @@
 // #define CLOCK_FREQ  MAX_INT_OSC_FREQ
 // #define UseIntOsc  TRUE
 #endif
-
-
-//instruction timing:
-#define INSTR_CYCLES  4UL //#clock cycles per instr (constant for PICs)
-//#define CLOCK_FREQ  (eval(DEVICE)##_FREQ)
-//#define CLOCK_FREQ  CLOCK_FREQ_eval(DEVICE) //(eval(DEVICE)##_FREQ)
-//#define CLOCK_FREQ_eval(device)  eval(device)##_FREQ
-//#define uSec2Instr(usec, clock)  ((usec) * InstrPerUsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-#define uSec2Instr(usec, clock)  ((usec) * InstrPerMsec(clock) / ONE_MSEC) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-//use this one for larger values:
-#define mSec2Instr(msec, clock)  ((msec) * InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-//#define Instr2uSec(instr, clock)  ((instr) / InstrPerUsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-//NOTE: this only seems to work up to 32 usec:
-#define Instr2uSec(instr, clock)  ((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-#define Instr2mSec(instr, clock)  ((instr) / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
-
-#define InstrPerSec(clock)  ((clock) / INSTR_CYCLES)  //;#instructions/sec at specified clock speed; clock freq is always a multiple of INSTR_CYCLES
-#define InstrPerMsec(clock)  (InstrPerSec(clock) / ONE_MSEC)  //;#instructions/msec at specified clock speed; not rounded but clock speeds are high enough that this doesn't matter
-#define InstrPerUsec(clock)  (InstrPerSec(clock) / ONE_SEC) //CAUTION: usually this one is fractional, so it's not accurate with integer arithmetic
-
-//#if CLOCK_FREQ == 32 MHz
-// #if Instr2uSec(120, CLOCK_FREQ) != 15
-//  #warning YELLOW_MSG "Instr2uSec bad arithmetic; taking shortcut"
-//  #undef Instr2uSec
-//  #define Instr2uSec(usec, clock)  ((usec) / 8)
-// #else
-//  #warning YELLOW_MSG "is okay?"
-// #endif
-//#endif
 
 
 //Int osc configuration:
@@ -137,6 +109,76 @@
 #endif
 
 
+//instruction timing:
+//Microchip PICs are nice in that they use (mostly) fixed instruction timing
+//#define CLOCK_FREQ  (eval(DEVICE)##_FREQ)
+//#define CLOCK_FREQ  CLOCK_FREQ_eval(DEVICE) //(eval(DEVICE)##_FREQ)
+//#define CLOCK_FREQ_eval(device)  eval(device)##_FREQ
+#define INSTR_CYCLES  4UL //#clock cycles per instr (constant for PICs); CAUTION: force UL arithmetic to avoid precision errors
+//#define InstrPerSec(clock)  rdiv(clock, INSTR_CYCLES)  //;#instructions/sec at specified clock speed; clock freq is always a multiple of INSTR_CYCLES
+//#define InstrPerSec(...)  ALLOW_2ARGS(__VA_ARGS__, InstrPerSec_2ARGS, InstrPerSec_1ARG, InstrPerSec_0ARGS) (__VA_ARGS__)
+//#define InstrPerSec_0ARGS()  InstrPerSec_1ARGS(CLOCK_FREQ)
+//#define InstrPerSec_1ARG(clock)  InstrPerSec_2ARGS(clock, /1)
+#define InstrPerSec(clock)  rdiv(clock, INSTR_CYCLES)  //;#instructions/sec at specified clock speed; clock freq is always a multiple of INSTR_CYCLES
+//#define InstrPerMsec(...)  ALLOW_1ARG(__VA_ARGS__, InstrPerMsec_1ARG, InstrPerMsec_0ARGS) (__VA_ARGS__)
+//#define InstrPerMsec_0ARGS()  InstrPerSec_1ARG(CLOCK_FREQ)
+//#define InstrPerMsec_1ARG(clock)  InstrPerSec(clock, /1000) //InstrPerSec(rdiv(clock, 1 msec))  //;#instructions/msec at specified clock speed; not rounded but clock speeds are high enough that this doesn't matter
+#define InstrPerMsec(clock)  InstrPerSec((clock) /1000UL) //InstrPerSec(rdiv(clock, 1 msec))  //;#instructions/msec at specified clock speed; not rounded but clock speeds are high enough that this doesn't matter
+//#define InstrPerUsec(...)  ALLOW_1ARG(__VA_ARGS__, InstrPerUsec_1ARG, InstrPerUsec_0ARGS) (__VA_ARGS__)
+//#define InstrPerUsec_0ARGS()  InstrPerUsec_1ARG(CLOCK_FREQ)
+//#define InstrPerUsec_1ARG(clock)  InstrPerSec(clock, /1000000) //InstrPerSec(rdiv(clock, 1 sec)) //CAUTION: usually this one is fractional, so it's not accurate with integer arithmetic
+#define InstrPerUsec(clock)  InstrPerSec((clock) /1000000UL) //InstrPerSec(rdiv(clock, 1 sec)) //CAUTION: usually this one is fractional, so it's not accurate with integer arithmetic
+#define MIPS(clock)  InstrPerUsec(clock)
+
+
+//#define Instr2uSec(instr, clock)  ((instr) / InstrPerUsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+//NOTE: this only seems to work up to 32 usec:
+//#define Instr2Sec(...)  ALLOW_3ARGS(__VA_ARGS__, Instr2uSec_3ARGS, Instr2uSec_2ARGS, Instr2uSec_1ARG) (__VA_ARGS__)
+//#define Instr2Sec_1ARG(instr)  Instr2uSec_2ARGS(instr, CLOCK_FREQ) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+//#define Instr2Sec_2ARGS(instr, clock)  Instr2uSec_3ARGS(instr, clock, usec) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+//#define Instr2Sec_3ARGS(instr, clock, scaled)  rdiv((instr) * INSTR_CYCLES scaled, clock) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Instr2Sec(...)  ALLOW_2ARGS(__VA_ARGS__, Instr2Sec_2ARGS, Instr2Sec_1ARG) (__VA_ARGS__)
+#define Instr2Sec_1ARG(instr)  Instr2Sec_2ARGS(instr, CLOCK_FREQ) // / PLL) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Instr2Sec_2ARGS(instr, clock)  rdiv((instr) * INSTR_CYCLES, clock) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+//#define Instr2mSec(instr, clock)  ((instr) / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Instr2Msec(...)  ALLOW_2ARGS(__VA_ARGS__, Instr2Msec_2ARGS, Instr2Msec_1ARG, missing) (__VA_ARGS__)
+#define Instr2Msec_1ARG(instr)  Instr2Msec_2ARGS(instr, CLOCK_FREQ) // / PLL)
+#define Instr2Msec_2ARGS(instr, clock)  IIF((instr) < 1000UL, Instr2Sec((instr) *1000UL, clock), Instr2Sec(instr, (clock) /1000UL)) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+//#define Instr2uSec(instr, clock)  InstrPerSec((instr) * (clock), clock) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Instr2Usec(...)  ALLOW_2ARGS(__VA_ARGS__, Instr2Usec_2ARGS, Instr2Usec_1ARG, missing) (__VA_ARGS__)
+#define Instr2Usec_1ARG(instr)  Instr2Usec_2ARGS(instr, CLOCK_FREQ) // / PLL)
+#define Instr2Usec_2ARGS(instr, clock)  IIF((instr) < 1000UL, Instr2Sec((instr) *1000000UL, clock), Instr2Sec((instr) *1000UL, (clock) /1000UL)) //((instr) * ONE_MSEC / InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+
+//#define uSec2Instr(usec, clock)  ((usec) * InstrPerUsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+//#define uSec2Instr(usec, clock)  ((usec) * InstrPerMsec(clock) / ONE_MSEC) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Sec2Instr(...)  ALLOW_2ARGS(__VA_ARGS__, Sec2Instr_2ARGS, Sec2Instr_1ARG, missing) (__VA_ARGS__)
+#define Sec2Instr_1ARG(sec)  Sec2Instr_2ARGS(sec, CLOCK_FREQ) // / PLL)
+#define Sec2Instr_2ARGS(sec, clock)  InstrPerSec((sec) * (clock)) //Sec2Instr ((sec) * InstrPerMsec(clock) / ONE_MSEC) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+//use this one for larger values:
+//#define mSec2Instr(msec, clock)  ((msec) * InstrPerMsec(clock)) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+#define Msec2Instr(...)  ALLOW_2ARGS(__VA_ARGS__, Msec2Instr_2ARGS, Msec2Instr_1ARG, missing) (__VA_ARGS__)
+#define Msec2Instr_1ARG(msec)  Msec2Instr_2ARGS(msec, CLOCK_FREQ) // / PLL)
+#define Msec2Instr_2ARGS(msec, clock)  IIF((msec) < 1000UL, InstrPerMsec((msec) * (clock)), InstrPerSec(rdiv(msec, 1000UL) * (clock))) //Sec2Instr ((sec) * InstrPerMsec(clock) / ONE_MSEC) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+#define Usec2Instr(...)  ALLOW_2ARGS(__VA_ARGS__, Usec2Instr_2ARGS, Usec2Instr_1ARG, missing) (__VA_ARGS__)
+#define Usec2Instr_1ARG(usec)  Usec2Instr_2ARGS(usec, CLOCK_FREQ) // / PLL)
+#define Usec2Instr_2ARGS(usec, clock)  IIF((usec) < 1000UL, InstrPerUsec((usec) * (clock)), InstrPerMsec(rdiv(usec, 1000UL) * (clock))) //Sec2Instr ((sec) * InstrPerMsec(clock) / ONE_MSEC) //CAUTION: scaling down CLOCK_FREQ avoids arith overflow, but causes rounding errors
+
+//#if CLOCK_FREQ == 32 MHz
+// #if Instr2uSec(120, CLOCK_FREQ) != 15
+//  #warning YELLOW_MSG "Instr2uSec bad arithmetic; taking shortcut"
+//  #undef Instr2uSec
+//  #define Instr2uSec(usec, clock)  ((usec) / 8)
+// #else
+//  #warning YELLOW_MSG "is okay?"
+// #endif
+//#endif
+
+
 #if 0
 //kludge: #warning doesn't reduce macro values, so force it here (mainly for debug/readability):
 #if CLOCK_FREQ == 20 MHz
@@ -167,7 +209,7 @@
 
 
 #ifdef PIC16X //extended instr set
- #warning BLUE_MSG "[INFO] Compiled for " TOSTR(DEVICE) " running at " TOSTR(CLOCK_FREQ) " with extended instruction set."
+ #warning BLUE_MSG "[INFO] Compiled for " TOSTR(DEVICE) " running at " TOSTR(CLOCK_FREQ) " (PLL " TOSTR(PLL) ") with extended instruction set."
 // #define GPRAM_LINEAR_START  0x2000
 // #warning BLUE_MSG "device "DEVICE" has ext instr set, "GPRAM_LINEAR_SIZE" ram"
 // #define RAM(device)  device##_RAM
@@ -177,11 +219,11 @@
 //#define GPRAM_LINEAR_SIZE  ((1 * 0x50) + 0x20) //128 excludes 16 bytes non-banked GP RAM
 //#define GPRAM_LINEAR_SIZE  ((3 * 0x50)) //256 excludes 16 bytes non-banked GP RAM
 #else
- #warning BLUE_MSG "[INFO] Compiled for " TOSTR(DEVICE) " running at " TOSTR(CLOCK_FREQ) " with NON-extended instruction set."
+ #warning BLUE_MSG "[INFO] Compiled for " TOSTR(DEVICE) " running at " TOSTR(CLOCK_FREQ) " (no PLL) with NON-extended instruction set."
 #endif
 
 
-#define TimerPreset(duration, overhead, which, clock)  (0 - rdiv(uSec2Instr(duration, clock) + overhead, which##_Prescalar))
+//#define TimerPreset(duration, overhead, which, clock)  (0 - rdiv(Usec2Instr(duration, clock) + overhead, which##_Prescalar))
 
 #ifndef LFINTOSC_FREQ
  #define LFINTOSC_FREQ  31250UL //31.25 KHz LFINTOSC
@@ -208,71 +250,74 @@
 
 
 #ifdef CLOCK_DEBUG //debug
+ #warning "[INFO] Including clock debug info"
  #ifndef debug
   #define debug() //define debug chain
  #endif
 //define globals to shorten symbol names (local vars use function name as prefix):
-    volatile AT_NONBANKED(0) uint32_t clock_freq_debug; //= CLOCK_FREQ;
-    volatile AT_NONBANKED(0) uint32_t max_intosc_debug; //= MAX_INTOSC_FREQ;
-    volatile AT_NONBANKED(0) uint8_t intosc_prescalar_debug; //= IntOsc_Prescalar(CLOCK_FREQ);
-    volatile AT_NONBANKED(0) uint8_t use_intosc_debug; //= UseIntOsc;
-    volatile AT_NONBANKED(0) uint8_t pll_debug; //= PLL;
-    volatile AT_NONBANKED(0) uint8_t osccon_debug; //= MY_OSCCON(CLOCK_FREQ);
-    volatile AT_NONBANKED(0) uint32_t instrpersec_debug;
-    volatile AT_NONBANKED(0) uint32_t instrpermsec_debug;
-    volatile AT_NONBANKED(0) uint32_t instrperusec_debug;
-    volatile AT_NONBANKED(0) uint32_t usec2instr1_debug;
-    volatile AT_NONBANKED(0) uint32_t usec2instr2_debug;
-    volatile AT_NONBANKED(0) uint32_t msec2instr3_debug;
-    volatile AT_NONBANKED(0) uint32_t usec2instr4_debug;
-    volatile AT_NONBANKED(0) uint32_t msec2instr5_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec1_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec2_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec3_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec4_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec5_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec6_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec7_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec8_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec9_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2usec10_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2msec11_debug;
-    volatile AT_NONBANKED(0) uint32_t instr2msec12_debug;
+//also, sdcc doesn't like "volatile" and "at" within functions
+//    volatile AT_NONBANKED(0) uint32_t clock_freq_debug; //= CLOCK_FREQ;
+//    volatile AT_NONBANKED(0) uint32_t max_intosc_debug; //= MAX_INTOSC_FREQ;
+//    volatile AT_NONBANKED(0) uint8_t intosc_prescalar_debug; //= IntOsc_Prescalar(CLOCK_FREQ);
+//    volatile AT_NONBANKED(0) uint8_t use_intosc_debug; //= UseIntOsc;
+//    volatile AT_NONBANKED(0) uint8_t pll_debug; //= PLL;
+//    volatile AT_NONBANKED(0) uint8_t osccon_debug; //= MY_OSCCON(CLOCK_FREQ);
+//    volatile AT_NONBANKED(0) uint32_t instrpersec_debug;
+//    volatile AT_NONBANKED(0) uint32_t instrpermsec_debug;
+//    volatile AT_NONBANKED(0) uint32_t instrperusec_debug;
+//    volatile AT_NONBANKED(0) uint32_t usec2instr1_debug;
+//    volatile AT_NONBANKED(0) uint32_t usec2instr2_debug;
+//    volatile AT_NONBANKED(0) uint32_t msec2instr3_debug;
+//    volatile AT_NONBANKED(0) uint32_t usec2instr4_debug;
+//    volatile AT_NONBANKED(0) uint32_t msec2instr5_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec1_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec2_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec3_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec4_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec5_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec6_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec7_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec8_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec9_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2usec10_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2msec11_debug;
+//    volatile AT_NONBANKED(0) uint32_t instr2msec12_debug;
 //    volatile AT_NONBANKED(0) uint32_t instr2msec_debug;
- INLINE void clock_debug(void)
+ /*INLINE*/ void clock_debug(void)
  {
-    debug(); //incl prev debug
-    clock_freq_debug = CLOCK_FREQ; //32 MHz == 0x1e8,4800, 4 MHz == 0x3d,0900, 1 MHz == 0xf,4240
-    max_intosc_debug = MAX_INTOSC_FREQ; //8 MHz (no PLL) == 0x7a,1200, 32 MHz (4x PLL) == 0x1e8,4800
-    intosc_prescalar_debug = IntOsc_Prescalar(CLOCK_FREQ); //should be 15 for 32 MHz PIC16X, 7 for 8 MHz PIC16
-    use_intosc_debug = UseIntOsc;
-    pll_debug = PLL; //should be 4 if PLL used, 1 otherwise
-    osccon_debug = MY_OSCCON(CLOCK_FREQ); //should be 0x70 for 8 MHz int osc and clock src controlled by Config
-    instrpersec_debug = InstrPerSec(CLOCK_FREQ); //8M @ 8 MIPS == 0x7a,1200
-    instrpermsec_debug = InstrPerMsec(CLOCK_FREQ); //8K @ 8 MIPS == 0x1f40
-    instrperusec_debug = InstrPerUsec(CLOCK_FREQ); //8 @ 8 MIPS
-    usec2instr1_debug = uSec2Instr(128UL, CLOCK_FREQ); //should be 1K @ 8 MIPS (8 MIPS == 128 nsec/instr) == 0x400
-    usec2instr2_debug = uSec2Instr(U16FIXUP(50 msec), CLOCK_FREQ); //should be 400K @ 8 MIPS (50 msec == 1/20 sec) == 0x6,1a80
-    msec2instr3_debug = mSec2Instr(50, CLOCK_FREQ); //should be ~ 400K @ 8 MIPS
-    usec2instr4_debug = uSec2Instr(120 msec, CLOCK_FREQ); //should be 1M @ 8 MIPS == 0xf,4240 ~= 960K == 0xe,a600
-    msec2instr5_debug = mSec2Instr(120, CLOCK_FREQ); //should be ~ 1M @ 8 MIPS
-    instr2usec1_debug = Instr2uSec(8, CLOCK_FREQ); //should be 1 @ 8 MIPS
-    instr2usec2_debug = Instr2uSec(32, CLOCK_FREQ); //should be 4 @ 8 MIPS
-    instr2usec3_debug = Instr2uSec(40, CLOCK_FREQ); //should be 5 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t freq = CLOCK_FREQ; //32 MHz == 0x1e8,4800, 4 MHz == 0x3d,0900, 1 MHz == 0xf,4240
+    volatile /*AT_NONBANKED(0)*/ uint32_t max_intosc = MAX_INTOSC_FREQ; //8 MHz (no PLL) == 0x7a,1200, 32 MHz (4x PLL) == 0x1e8,4800
+    volatile /*AT_NONBANKED(0)*/ uint8_t int_prescalar = IntOsc_Prescalar(CLOCK_FREQ); //should be 15 for 32 MHz PIC16X, 7 for 8 MHz PIC16
+    volatile /*AT_NONBANKED(0)*/ uint8_t use_intosc = UseIntOsc;
+    volatile /*AT_NONBANKED(0)*/ uint8_t pll = PLL; //should be 4 if PLL used, 1 otherwise
+    volatile /*AT_NONBANKED(0)*/ uint8_t osccon = MY_OSCCON(CLOCK_FREQ); //should be 0x70 for 8 MHz int osc and clock src controlled by Config
+    volatile /*AT_NONBANKED(0)*/ uint32_t instrpersec = InstrPerSec(CLOCK_FREQ); //8M @ 8 MIPS == 0x7a,1200
+    volatile /*AT_NONBANKED(0)*/ uint32_t instrpermsec = InstrPerMsec(CLOCK_FREQ); //8K @ 8 MIPS == 0x1f40
+    volatile /*AT_NONBANKED(0)*/ uint32_t instrperusec = InstrPerUsec(CLOCK_FREQ); //8 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t usec2instr1 = Usec2Instr(128); //, CLOCK_FREQ); //should be 1K @ 8 MIPS (8 MIPS == 128 nsec/instr) == 0x400
+    volatile /*AT_NONBANKED(0)*/ uint32_t usec2instr2 = Usec2Instr(/*U16FIXUP*/(50 msec)); //, CLOCK_FREQ); //should be 400K @ 8 MIPS (50 msec == 1/20 sec) == 0x6,1a80
+    volatile /*AT_NONBANKED(0)*/ uint32_t msec2instr3 = Msec2Instr(50); //, CLOCK_FREQ); //should be ~ 400K @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t usec2instr4 = Usec2Instr(120 msec); //, CLOCK_FREQ); //should be 1M @ 8 MIPS == 0xf,4240 ~= 960K == 0xe,a600
+    volatile /*AT_NONBANKED(0)*/ uint32_t msec2instr5 = Msec2Instr(120); //, CLOCK_FREQ); //should be ~ 1M @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec1 = Instr2Usec(8); //, CLOCK_FREQ); //should be 1 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec2 = Instr2Usec(32); //, CLOCK_FREQ); //should be 4 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec3 = Instr2Usec(40); //, CLOCK_FREQ); //should be 5 @ 8 MIPS
 //    instr2usec_debug = Instr2uSec(56, CLOCK_FREQ); //should be 7 @ 8 MIPS
 //    instr2usec_debug = Instr2uSec(72, CLOCK_FREQ); //should be 9 @ 8 MIPS
-    instr2usec4_debug = Instr2uSec(120, CLOCK_FREQ); //should be 15 @ 8 MIPS
-    instr2usec5_debug = Instr2uSec(64000, CLOCK_FREQ); //should be 8K @ 8 MIPS; 8,000 == 0x1f40
-    instr2usec6_debug = Instr2uSec(128000, CLOCK_FREQ); //should be 16K @ 8 MIPS; 16,000 == 0x3e80
-    instr2usec7_debug = Instr2uSec(320000, CLOCK_FREQ); //should be 40K @ 8 MIPS; 40,000 == 0x9c40
-    instr2usec8_debug = Instr2uSec(65535 * 8, CLOCK_FREQ); //should be ~ 64K @ 8 MIPS; 65,535 == 0xffff
-    instr2usec9_debug = Instr2uSec(65536 * 8, CLOCK_FREQ); //should be 64K @ 8 MIPS; 65,536 == 0x1,0000
-    instr2usec10_debug = Instr2uSec(65537 * 8, CLOCK_FREQ); //should be ~ 64K @ 8 MIPS; 65,537 == 0x1,0001
-    instr2msec11_debug = Instr2mSec(64000, CLOCK_FREQ); //should be 8 @ 8 MIPS
-    instr2msec12_debug = Instr2mSec(320000, CLOCK_FREQ); //should be 40 @ 8 MIPS; 40 == 0x28
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec4 = Instr2Usec(120); //, CLOCK_FREQ); //should be 15 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec5 = Instr2Usec(64000); //, CLOCK_FREQ); //should be 8K @ 8 MIPS; 8,000 == 0x1f40
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec6 = Instr2Usec(128000); //, CLOCK_FREQ); //should be 16K @ 8 MIPS; 16,000 == 0x3e80
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec7 = Instr2Usec(320000); //, CLOCK_FREQ); //should be 40K @ 8 MIPS; 40,000 == 0x9c40
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec8 = Instr2Usec(65535); //, CLOCK_FREQ); //should be ~ 8K @ 8 MIPS; 8K == 0x2000
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec9 = Instr2Usec(65536 * 8); //, CLOCK_FREQ); //should be 64K @ 8 MIPS; 65,536 == 0x1,0000
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2usec10 = Instr2Usec(65537 * 8); //, CLOCK_FREQ); //should be ~ 64K @ 8 MIPS; 65,537 == 0x1,0001
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2msec11 = Instr2Msec(64000); //, CLOCK_FREQ); //should be 8 @ 8 MIPS
+    volatile /*AT_NONBANKED(0)*/ uint32_t instr2msec12 = Instr2Msec(320000); //, CLOCK_FREQ); //should be 40 @ 8 MIPS; 40 == 0x28
 //    instr2usec_debug = 2 * U16FIXUP(60 * ONE_MSEC);
 //    instr2usec_debug = InstrPerMsec(CLOCK_FREQ);
 //    instr2usec_debug = (120 * ONE_MSEC / InstrPerMsec(CLOCK_FREQ));
+    debug(); //incl other debug
+//    freq = 0;
  }
  #undef debug
  #define debug()  clock_debug()
@@ -301,7 +346,7 @@ INLINE void debug(void)
 //NOTE: power-up default speed for PIC16F688 is 1 MIPS (4 MHz)
 INLINE void init_clock(void)
 {
-    LABDCL(0xCF);
+//    LABDCL(0xCF);
 //    debug();
 //??	if (!osccon.OSTS) //running from int osc
 //	if (UseIntOsc || ExtClockFailed) /*can only change int osc freq*/

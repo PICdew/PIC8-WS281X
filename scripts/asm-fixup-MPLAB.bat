@@ -13,7 +13,7 @@ set BASENAME=%3
 set BASENAME=%BASENAME:.cof=%
 set OUTDIR=%4
 set OUTDIR=%OUTDIR:\=/%
-ren echo outdir %OUTDIR%
+rem echo outdir %OUTDIR%
 rem echo basename %BASENAME%
 rem set INFILE=debug\%BASENAME%.asm
 rem set OUTFILE=debug\%BASENAME%_c2asm.asm
@@ -42,7 +42,7 @@ rem if "%DEVICE:~0,3%" neq "PIC"  set DEVICE=PIC%DEVICE%
 rem set /p WANTDEBUG=Debug (y/[n])?
 rem if "%WANTDEBUG:~0,1%" eq "y"  set CFLAGS=%CFLAGS% -d _DEBUG
 rem if "%WANTDEBUG:~0,1%" eq "Y"  set CFLAGS=%CFLAGS% -d _DEBUG
-set CFLAGS=%CFLAGS% -d _DEBUG
+rem ?set CFLAGS=%CFLAGS% -d _DEBUG
 rem just use MPASM from within MPLAB now
 rem :preproc
 rem if "x%2" == "xpost"  goto postproc

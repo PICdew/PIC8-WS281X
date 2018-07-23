@@ -1,9 +1,16 @@
-//WS281X-compatible SSR controller:
+//PIC8 WS281X break-out/adapter:
+//Use an 8-bit Microchip PIC (8 MIPS) to decode WS281X data stream.
+//Decoded stream can control DIYC SSRs (8 channels dedicated or 56 channels chipiplexed) or other WS281X data streams.
 
-//TODO: is 8 MIPS PIC fast enough to decode WS281X data stream?
-//invert WS281X data allows UART to be used; must be faster than 800 Kbaud
-//alternative: Xilinx xxx CPLD; run /opt/Xilinx/14.7/ISE_DS/run_ise.sh
+//History:
+//0.2  DJ  12/8/17  move Ch*plexing encoder onto PIC
+//0.3  DJ  6/24/18  finally got reworked includes + sdcc + asm fixup working
+//0.4  DJ  7/16/18  rework input stream; use CCP1 + CCP3 + MSSP to decode WS281X as SPI instead of inverted USART as serial data (avoids need to compensate for start/stop bits)
+//0.5  DJ  7/26/18  add breakout handler (display 24 bits of first node received)
 
+//alternative approaches considered:
+//- invert WS281X data and use PIC USART; must be faster than 800 Kbaud; jittery signal is tricky to decode (must accept frame errors as valid data)
+//- Xilinx 9587 CPLD; run CPLD @50 MHz and break out WS281X data; run /opt/Xilinx/14.7/ISE_DS/run_ise.sh
 
 //Serial in daisy chained from WS281X data line (800 KHz nominal, but forgiving).
 //8 parallel out controlling AC or DC SSRs (dedicated or chipiplexed)
@@ -15,14 +22,7 @@
 //Chipiplexing encoder (C) 2014-2017 djulien
 //TODO: put complete history here, add this SDCC/WS281X transport rewrite
 
-//History:
-//0.2  DJ  12/8/17  move Ch*plexing encoder onto PIC
-//0.3  DJ  6/24/18  finally got reworked includes + sdcc + asm fixup working
-//0.4  DJ  7/16/18  rework input streeam; use CCP1 + CCP3 + MSSP to decode WS281X as SPI instead of inverted USART as serial data (avoids need to compensate for start/stop bits)
-
-
-//NOTE: PIC UART could be used with inverted WS281X signal or fancy variable bit time starting logic, but
-
+//NOTE: PIC UART could be used with inverted WS281X signal or fancy variable bit time starting logic, but SPI seems simpler
 //PIC datasheet:
 //SSPxCON1 r/w controls SPI opn, and SSPxSTAT 0xc0 r/w, 0x3f ro
 //SSPxBUF contains rcvd byte, SSPxIF flag set
@@ -86,10 +86,10 @@
 //#define debug  //include compile-time value checking
 
 //include compile-time value checking:
-#define WANT_FRPAN //display debug/status info on "front panel" made of 24 WS281X LEDs
-#define CALIBRATE_TIMER
+#define CALIBRATE_TIMER //timing test; NOTE: overrides all other options
+#define WANT_BREAKOUT //display debug/status info on "front panel" made of 24 WS281X LEDs; NOTE: overrides all other options
 //#define SERIAL_DEBUG
-//#define TIMER1_DEBUG
+#define TIMER_DEBUG
 //#define CLOCK_DEBUG
 //#define SCAN_DEBUG
 //#define MP3_TEST
@@ -98,19 +98,40 @@
 
 //#include <xc.h> //automatically selects correct device header defs
 //#include "helpers.h"
-//#include "compiler.h"
+#include "compiler.h"
 //#include "clock.h" //override default clock rate
 //#include "config.h"
 //#include "timer_dim.h"
 //#include "timer_50msec.h"
 //#include "timer_msec.h"
-#include "timers.h"
+//#include "timers.h"
+#define wait_once(ignored)  nop()
+//////////////#include "ws281x.h"
 //#include "wdt.h" //TODO?
 //#include "serial.h"
 //#include "zc.h"
 //#include "outports.h"
 
+#define VA_COMMA(...)  SIXTH(__VA_ARGS__, COMMA, COMMA, COMMA, COMMA,)
+#define SIXTH(a,b,c,d,e,f, ...)  f
+#define COMMA  .
+#define TEST(...)  ALLOW_3ARGS(/*VA_COMMA(__VA_ARGS)*/, ## __VA_ARGS__, TEST_2ARGS, TEST_1ARG, TEST_0ARGS) (__VA_ARGS__)
+#define TEST_0ARGS()  TEST_1ARG(volatile uint8_t X = 1)
+#define TEST_1ARG(a)  TEST_2ARGS(volatile uint8_t Y = 2, a)
+#define TEST_2ARGS(a, b) { a; b; }
 
+//    { volatile uint8_t Y = 2; ; };
+//    { volatile uint8_t Y = 2; WREG = 0x11; };
+//    { WREG = 0x22; WREG = 0x33; };
+
+void test()
+{
+    TEST();
+    TEST(WREG = 0x11);
+    TEST(WREG = 0x22, WREG = 0x33);
+}
+#undef init
+#define init()  test()
 /////////////////////////////////////////////////////////////////////////////////
 ////
 /// Pin assignments:
@@ -136,42 +157,22 @@
 //        +-----------------------------+
 
 //8 dedicated or chipiplexed channels:
-#define CH0_PIN  RA0
-#define _CH0_PIN  0xA0
-#define CH0_MASK  PORTMAP16(_CH0_PIN)
-
-#define CH1_PIN  RA1
-#define _CH1_PIN  0xA1
-#define CH1_MASK  PORTMAP16(_CH1_PIN)
-
-#define CH2_PIN  RA2
-#define _CH2_PIN  0xA2
-#define CH2_MASK  PORTMAP16(_CH2_PIN)
-
-#define CH3_PIN  RA3
-#define _CH3_PIN  0xA3
-#define CH3_MASK  PORTMAP16(_CH3_PIN)
-
-#define CH4_PIN  RA4
-#define _CH4_PIN  0xA4
-#define CH4_MASK  PORTMAP16(_CH4_PIN)
-
-#define CH5_PIN  RB5 //CAUTION: moved to RB because RA5 is input-only
-#define _CH5_PIN  0xB5
-#define CH5_MASK  PORTMAP16(_CH5_PIN)
-
-#define CH6_PIN  RA6
-#define _CH6_PIN  0xA6
-#define CH6_MASK  PORTMAP16(_CH6_PIN)
-
-#define CH7_PIN  RA7
-#define _CH7_PIN  0xA7
-#define CH7_MASK  PORTMAP16(_CH7_PIN)
+//#define CH0_PIN  RA0
+//#define _CH0_PIN  0xA0
+//#define CH0_MASK  PORTMAP16(_CH0_PIN)
+#define CH0_PIN  A0
+#define CH1_PIN  A1
+#define CH2_PIN  A2
+#define CH3_PIN  A3
+#define CH4_PIN  A4
+#define CH5_PIN  B5 //CAUTION: moved to PORTB because RA5 is input-only (VPP/MCLR)
+#define CH6_PIN  A6
+#define CH7_PIN  A7
 
 //ZC for AC SSRs:
-#define ZC_PIN  RA5 //reused VPP/MCLR since it's input-only
-#define _ZC_PIN  0xA5
-#define ZC_MASK  PORTMAP16(_ZC_PIN)
+#define ZC_PIN  A5 //reused VPP/MCLR since it's input-only
+//#define _ZC_PIN  0xA5
+//#define ZC_MASK  PORTMAP16(_ZC_PIN)
 
 //ICMP pins:
 //#define ICMP_VPP_PIN  RA5
@@ -179,28 +180,27 @@
 //#define ICMP_CLK_PIN  RB6
 
 //SPI pins:
-#define SDI_PIN  RB1 //aka MOSI
-#define _SDI_PIN  0xB1
-#define SDI_MASK  PORTMAP16(_SDI_PIN)
+#define SDI_PIN  B1 //aka MOSI
+//#define _SDI_PIN  0xB1
+//#define SDI_MASK  PORTMAP16(_SDI_PIN)
+#define SCLK_PIN  B4
+//#define _SCLK_PIN  0xB4
+//#define SCLK_MASK  PORTMAP16(_SCLK_PIN)
 
-#define SCLK_PIN  RB4
-#define _SCLK_PIN  0xB4
-#define SCLK_MASK  PORTMAP16(_SCLK_PIN)
-
-//delay WS281X data stream and use as SDI clock to recover SDI data:
-#define DELAYIN_PIN  RB0 //use T1G to trigger 0.5 usec delay
-#define _DELAYIN_PIN  0xB0
-#define DELAYIN_MASK  PORTMAP16(_DELAYIN_PIN)
-
-#define DELAYOUT_PIN  RB3 //CCP1 has delayed SCLK
-#define _DELAYOUT_PIN  0xB3
-#define DELAYOUT_MASK  PORTMAP16(_DELAYOUT_PIN)
+//WS281X data stream recovery:
+//delay SDI by 0.5 usec and use as SDI clock to recover SDI data
+#define DELAYIN_PIN  B0 //use T1G to trigger 0.5 usec delay
+//#define _DELAYIN_PIN  0xB0
+//#define DELAYIN_MASK  PORTMAP16(_DELAYIN_PIN)
+#define DELAYOUT_PIN  B3 //CCP1 has delayed SCLK
+//#define _DELAYOUT_PIN  0xB3
+//#define DELAYOUT_MASK  PORTMAP16(_DELAYOUT_PIN)
 
 //that leaves 1 pin for debug/front panel LEDs:
-//(actually, RB6 and RB7 are still available)
-#define FRPAN_PIN  RB2
-#define _FRPAN_PIN  0xB2
-#define FRPAN_MASK  PORTMAP16(_FRPAN_PIN)
+//(actually, RB6 and RB7 are still available also)
+#define FRPAN_PIN  B2
+//#define _FRPAN_PIN  0xB2
+//#define FRPAN_MASK  PORTMAP16(_FRPAN_PIN)
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -226,20 +226,22 @@
 /// Front panel/debug:
 //
 
-#ifdef WANT_FRPAN
- INLINE void frpan_init()
- {
-//    init(); //other init first
+//#ifdef WANT_FRPAN
+INLINE void frpan_init()
+{
+    init(); //other init first
 //set front panel/debug pin to Output:
 //    TRISA &= ~Abits(FRPAN_MASK); //set front panel pin to Output
 //    TRISBC &= ~BCbits(FRPAN_MASK);
-    TRIS[PORTOF(_FRPAN_PIN) >> 4] &= ~ 1 << PINOF(_FRPAN_PIN);
-    TRIS[0xA] &= ~ 4; //debug
-	init(); //do other init *after* TRIS init (to minimize side effects on external circuits); NOTE: no race conditions occur with cooperative event handling (no interrupts)
+//    TRIS[PORTOF(_FRPAN_PIN) >> 4] &= ~ 1 << PINOF(_FRPAN_PIN);
+    TRISx(FRPAN_PIN) = 0; //set for Output
+    LATx(FRPAN_PIN) = 0; //make sure it's low so WS281X will be ready to receive data
+//    TRIS[0xA] &= ~ 4; //debug
+//	init(); //do other init *after* TRIS init (to minimize side effects on external circuits); NOTE: no race conditions occur with cooperative event handling (no interrupts)
 }
- #undef init
- #define init()  frpan_init() //event handler function chain
-#endif
+#undef init
+#define init()  frpan_init() //event handler function chain
+//#endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -255,15 +257,20 @@
 
 //toggle LED @1 Hz:
 //tests clock timing and overall hardware
- INLINE void calibrate_init(void)
+ /*INLINE*/ void calibrate_init(void)
  {
+    init(); //other init first
 //	on_tmr_1sec(); //prev event handlers first
 //    wait(1 sec);
+    TRISx(LED_PIN) = 0; //set for Output
     for (;;)
     {
-        wait(1 sec);
-        if (LED_PIN) LED_PIN = 0;
-        else LED_PIN = 1;
+        wait_once(1 sec); //uses Timer 1 + 8-bit loop counter
+//        nop();
+//        if (LATx(LED_PIN)) LATx(LED_PIN) = 0; //NOTE: use LATx to avoid read-modify-write problems (in case heavy current on LED pin)
+//        else LATx(LED_PIN) = 1;
+//        LATx(LED_PIN) ^= 1 << LATxBIT(LED_PIN);
+        WREG = 1 << LATxBIT(LED_PIN); xorwf(LATxADDR(LED_PIN));
         if (NEVER) break; //avoid "unreachable code" warning
     }
  }
@@ -276,25 +283,151 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 ////
+/// ZC handler:
+//
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
+/// SSR handler:
+//
+
+#if 0
+#define AC  *2 //dimming occurs during each half cycle
+#define Hz //dummy keyword for reabability
+#define DC //dummy keyword for readability
+non_inline ssr_refresh()
+{
+    for (;;)
+    {
+        wait(rdiv(1 sec / 256, 60 Hz AC), handler_chain()); //~32.5 usec for 2x60 Hz
+//        wait(rdiv(1 sec / 256, 50 Hz AC), handler_chain()); //~39 usec for 2x50 Hz
+//        wait(rdiv(1 sec / 256, 50 Hz DC), handler_chain()); //~78 usec for 50 Hz
+        if (--evt_delay) continue; //not time to update yet
+        TRISA = SSRAoff; //anti-ghosting
+        TRISBC = SSRBCOFF;
+        PORTA = ssrAbuf;
+        PORTB = ssrBCbuf;
+        TRISA = SSRAon;
+        TRISBC = SSRBCon;
+//TODO: get next vals
+        ssrAbuf = 1;
+        ssrBCbuf = 2;
+        evt_delay = 3;
+        return;
+    }
+}
+#undef handler_chain
+#define handler_chain()  ssr_refresh()
+
+
+#define getSPIbyte(dest, timeout)  { waitSPIbyte_WREG(); dest = SSP1BUF; }
+non_inline void waitSPIbyte_WREG()
+{
+    wait(50 usec, if (SSP1IF) return);
+    ssr_refresh;
+}
+non_inline spi_handler()
+{
+}
+#endif
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
+/// WS281X splitter:
+//
+
+
+NONBANKED volatile uint2x8_t wslen;
+
+
+//send SPI bytes to channel 0:
+#if 0
+non_inline void split0()
+{
+//    TRISOF(_CH0_PIN) &= ~PINMASK(_CH0_PIN); //make sure pin is output
+//    TRIS(CH0_PIN) = 0; //make sure pin is output (only needed first time; init was tristate for chipiplexing)
+    PORTx(CH0_PIN) = 0; //reset pin and pre-set BANKSEL
+    for (;;)
+    {
+        volatile UNBANKED uint8_t byte;
+        getSPIbyte(byte, 50 usec, command());
+        outWSbit(PORTx(CH0_PIN), byte & 0x80); //lsb first
+        outWSbit(PORTx(CH0_PIN), byte & 0x40);
+        outWSbit(PORTx(CH0_PIN), byte & 0x20);
+        outWSbit(PORTx(CH0_PIN), byte & 0x10);
+        outWSbit(PORTx(CH0_PIN), byte & 0x08);
+        outWSbit(PORTx(CH0_PIN), byte & 0x04);
+        outWSbit(PORTx(CH0_PIN), byte & 0x02);
+        --wslen;
+        outWSbit(PORTx(CH0_PIN), byte & 0x01);
+    }
+}
+#endif
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
 /// Main logic:
 //
 
 //#include "func_chains.h" //finalize function chains; NOTE: this adds call/return/banksel overhead, but makes debug easier
-inline void eventh()
+//inline void bkg()
+//{
+//    ssr_refresh();
+//}
+
+
+//command dispatch:
+//NOTE: wrapped as a function, but re-entrant and never returns (enter/exit via goto); leaves stack cluttered, but doesn't matter since stack will wrap when full anyway
+non_inline void command()
 {
+#if 0
+    volatile UNBANKED uint8_t cmd;
+    getSPIbyte(cmd, 0, command());  //WS281X stream is 800 KHz (30 usec/24-bit node); each byte takes 10 usec (80 instr @ 8 MIPS); must poll >= 100 KHz
+    if (cmd & 0x10) //splitter; no SSRs
+    {
+//            volatile UNBANKED uint8_t ch;
+        getSPIbyte(wslen.high, 50 usec, command());
+        getSPIbyte(wslen.low, 50 usec, command());
+//            PCL += cmd & 0x0F; //which pin to redirect to
+//            split0();
+//            split1();
+        switch (cmd & 0x0F) //which pin to redirect to
+        {
+            case 0: split0(); break;
+            case 1: split1(); break;
+        }
+        continue;
+    }
+#endif
 }
+
+#ifndef debug
+ #define debug()
+#endif
 
 
 //init + evt handler loop:
 void main(void)
 {
+    volatile uint8_t var1;
+    volatile uint16_t var2 = 2;
+    volatile uint32_t var3;
 //no    NUMBANKS(2); //reduce banksel overhead
 //	ONPAGE(LEAST_PAGE); //put code where it will fit with no page selects
 //    test();
     debug(); //incl debug info
 	init(); //1-time set up of control regs, memory, etc.
-    for (;; eventh()) //main loop; needs to call event handler periodically
+//?    PORTA = PORTBC = 0;
+//    for (;; eventh()) //main loop; needs to call event handler periodically
+    for (;;)
     {
+        ++var1;
+        ++var2;
+        ++var3;
+        command();
 //        --PCL;
 //        on_tmr_dim();
 //        on_tmr_50msec(); //CAUTION: must come before tmr_1sec()

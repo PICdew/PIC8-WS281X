@@ -21,6 +21,9 @@
 #ifdef debug
  #undef debug
  #define debug()
+ #warning "[INFO] Including Debug info"
+//#elif defined(__DEBUG) //MPLAB flag
+// #define debug()
 #endif
 //#define on_zc()
 //#define on_rx()
@@ -235,6 +238,13 @@ typedef union
     uint16_t as_uint16;
     uint8_t* as_ptr;
 } uint2x8_t;
+
+
+//max values:
+#define uint8_t_MAX  0xffUL
+#define uint16_t_MAX  0xffffUL
+#define uint24_t_MAX  0xffffffUL
+#define uint32_t_MAX  0xffffffffUL
 
 
 //avoid typecast warnings:
@@ -517,7 +527,7 @@ __at (INDF1_ADDR) volatile uint8_t INDF1_PREINC;
 //#error CYAN_MSG "TODO: __sfr16 ASM fixups"
 
 //16-bit regs:
-#define isLE16(reg)  (reg##L_ADDR + 1 == reg##H_ADDR)
+#define isLE16(reg)  (reg##L_ADDR + 1 == reg##H_ADDR) //(CONCAT(reg, L_ADDR) + 1 == CONCAT(reg, H_ADDR))
 
 //#define ADDR(reg)  reg##ADDR
 #if isLE16(FSR0)
@@ -573,7 +583,7 @@ __at (INDF1_ADDR) volatile uint8_t INDF1_PREINC;
 
 //allow access to vars, regs in asm:
 //NOTE: needs to be wrapped within macro for token-pasting
-#define ASMREG(reg)  _##reg
+#define ASMREG(reg)  CONCAT(_, reg) //_##reg
 
 
 //put a "label" into compiled code:
@@ -648,35 +658,35 @@ INLINE void idle()
     retlw val; __endasm; \
 }
 
-#define incfsz(...)  USE_ARG3(__VA_ARGS__, incfsz_2ARGS, incfsz_1ARG) (__VA_ARGS__)
+#define incfsz(...)  ALLOW_2ARGS(__VA_ARGS__, incfsz_2ARGS, incfsz_1ARG) (__VA_ARGS__)
 #define incfsz_1ARG(val)  incfsz_2ARGS(val, F) //update target reg
 #define incfsz_2ARGS(val, dest)  \
 { \
     __asm; \
     incfsz val, dest; __endasm; \
 }
-#define incf(...)  USE_ARG3(__VA_ARGS__, incf_2ARGS, incf_1ARG) (__VA_ARGS__)
+#define incf(...)  ALLOW_2ARGS(__VA_ARGS__, incf_2ARGS, incf_1ARG) (__VA_ARGS__)
 #define incf_1ARG(val)  incf_2ARGS(val, F) //update target reg
 #define incf_2ARGS(val, dest)  \
 { \
     __asm; \
     incf val, dest; __endasm; \
 }
-#define addwf(...)  USE_ARG3(__VA_ARGS__, addwf_2ARGS, addwf_1ARG) (__VA_ARGS__)
+#define addwf(...)  ALLOW_2ARGS(__VA_ARGS__, addwf_2ARGS, addwf_1ARG) (__VA_ARGS__)
 #define addwf_1ARG(val)  addwf_2ARGS(val, F) //update target reg
 #define addwf_2ARGS(val, dest)  \
 { \
     __asm; \
     addwf val, dest; __endasm; \
 }
-#define subwf(...)  USE_ARG3(__VA_ARGS__, subwf_2ARGS, subwf_1ARG) (__VA_ARGS__)
+#define subwf(...)  ALLOW_2ARGS(__VA_ARGS__, subwf_2ARGS, subwf_1ARG) (__VA_ARGS__)
 #define subwf_1ARG(val)  subwf_2ARGS(val, F) //update target reg
 #define subwf_2ARGS(val, dest)  \
 { \
     __asm; \
     subwf val, dest; __endasm; \
 }
-#define addwfc(...)  USE_ARG3(__VA_ARGS__, addwfc_2ARGS, addwfc_1ARG) (__VA_ARGS__)
+#define addwfc(...)  ALLOW_2ARGS(__VA_ARGS__, addwfc_2ARGS, addwfc_1ARG) (__VA_ARGS__)
 #define addwfc_1ARG(val)  addwfc_2ARGS(val, F) //update target reg
 #ifdef PIC16X
  #define addwfc_2ARGS(val, dest)  \
@@ -692,21 +702,21 @@ INLINE void idle()
     addwf val, dest; __endasm; \
  }
 #endif
-#define andw(...)  USE_ARG3(__VA_ARGS__, andwf_2ARGS, andwf_1ARG) (__VA_ARGS__)
+#define andw(...)  ALLOW_2ARGS(__VA_ARGS__, andwf_2ARGS, andwf_1ARG) (__VA_ARGS__)
 #define andwf_1ARG(val)  andwf_2ARGS(val, F) //update target reg
 #define andwf_2ARGS(val, dest)  \
 { \
     __asm; \
     andwf val, dest; __endasm; \
 }
-#define iorwf(...)  USE_ARG3(__VA_ARGS__, iorwf_2ARGS, iorwf_1ARG) (__VA_ARGS__)
+#define iorwf(...)  ALLOW_2ARGS(__VA_ARGS__, iorwf_2ARGS, iorwf_1ARG) (__VA_ARGS__)
 #define iorwf_1ARG(val)  iorwf_2ARGS(val, F) //update target reg
 #define iorwf_2ARGS(val, dest)  \
 { \
     __asm; \
     iorwf val, dest; __endasm; \
 }
-#define xorwf(...)  USE_ARG3(__VA_ARGS__, xorwf_2ARGS, xorwf_1ARG) (__VA_ARGS__)
+#define xorwf(...)  ALLOW_2ARGS(__VA_ARGS__, xorwf_2ARGS, xorwf_1ARG) (__VA_ARGS__)
 #define xorwf_1ARG(val)  xorwf_2ARGS(val, F) //update target reg
 #define xorwf_2ARGS(val, dest)  \
 { \
@@ -749,7 +759,7 @@ INLINE void idle()
 //LSLF is preferred over RLF; clears LSB
 //need to use a macro here for efficient access to reg (don't want another temp or stack)
 //#define rl_nc(reg)  
-#define lslf(...)  USE_ARG3(__VA_ARGS__, lslf_2ARGS, lslf_1ARG) (__VA_ARGS__)
+#define lslf(...)  ALLOW_2ARGS(__VA_ARGS__, lslf_2ARGS, lslf_1ARG) (__VA_ARGS__)
 #define lslf_1ARG(val)  lslf_2ARGS(val, F) //update target reg
 #define lslf_2ARGS(reg, dest)  \
 { \
@@ -773,7 +783,7 @@ INLINE VOID rl_nc(reg)  \\
  }
 #endif
 //NOTE: use CARRY as-is; caller set already
-#define rlf(...)  USE_ARG3(__VA_ARGS__, rlf_2ARGS, rlf_1ARG) (__VA_ARGS__)
+#define rlf(...)  ALLOW_2ARGS(__VA_ARGS__, rlf_2ARGS, rlf_1ARG) (__VA_ARGS__)
 #define rlf_1ARG(val)  rlf_2ARGS(val, F) //update target reg
 #define rlf_2ARGS(reg, dest)  \
 { \
@@ -786,7 +796,7 @@ INLINE VOID rl_nc(reg)  \\
  #define swap(reg)  __asm__(" swapf " #reg ",F")
  #define swap_WREG(reg)  __asm__(" swapf " #reg ",W")
 #else
- #define swap(...)  USE_ARG3(__VA_ARGS__, swap_2ARGS, swap_1ARG) (__VA_ARGS__)
+ #define swap(...)  ALLOW_2ARGS(__VA_ARGS__, swap_2ARGS, swap_1ARG) (__VA_ARGS__)
  #define swap_1ARG(val)  swap_2ARGS(val, F) //update target reg
  #define swap_2ARGS(reg, dest)  \
  { \
@@ -813,8 +823,8 @@ INLINE VOID rl_nc(reg)  \\
 //set fsr high + low to address:
 #define Indirect(fsr, addr)  \
 { \
-    fsr##L = (addr) & 0xff; \
-    fsr##H = (addr) / 0x100; /*CAUTION: 1 bit on 16F688*/ \
+    CONCAT(fsr, L) = (addr) & 0xff; \
+    CONCAT(fsr, H) = (addr) / 0x100; /*CAUTION: 1 bit on 16F688*/ \
 }
 
 #ifdef COMPILER_DEBUG //debug
@@ -845,10 +855,14 @@ INLINE VOID rl_nc(reg)  \\
 
 INLINE void analog_init()
 {
+    init(); //other init first
 	IFANSELA(ANSELA = 0); //must turn off analog functions for digital I/O
 	IFANSELBC(ANSELBC = 0);
-	init(); //do other init after Ports (to minimize side effects on external circuits); NOTE: no race condition occur with cooperative event handling (no interrupts)
+//	init(); //do other init after Ports (to minimize side effects on external circuits); NOTE: no race condition occur with cooperative event handling (no interrupts)
 }
+#undef init
+#define init()  analog_init()
+
 
 #include "helpers.h"
 

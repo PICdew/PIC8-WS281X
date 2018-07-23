@@ -464,7 +464,7 @@ function asm_optimize()
                     if (!all[fwdinx].match(goaway)) break;
                     line = all[inx] = all[fwdinx].trimln() + ";;R4 " + line; //update "line" for further optimization
                     if (labels[parts[2]].numrefs == 1) all.comment(labels[parts[2]].definition, "U4"); //remove unneeded label
-//no                    return; //look for other optimizations
+/*yes*/                    return; //look for other optimizations
                 }
 //remove useless jumps:
             if (parts = line.match(labeldef))

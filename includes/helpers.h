@@ -14,13 +14,19 @@
 
 //stringize for text strings and #pragma messages:
 //https://stackoverflow.com/questions/1562074/how-do-i-show-the-value-of-a-define-at-compile-time
-#define TOSTR(x) TOSTR_INNER(x)
-#define TOSTR_INNER(x) #x
+#define TOSTR(x)  TOSTR_INNER(x)
+#define TOSTR_INNER(x)  #x
 
-#define CONCAT(lhs, rhs) CONCAT_INNER(lhs, rhs)
-#define CONCAT_INNER(lhs, rhs) lhs##rhs
+//#define CONCAT(lhs, rhs) CONCAT_INNER(lhs, rhs)
+//#define CONCAT_INNER(lhs, rhs) lhs##rhs
+#define CONCAT(...)  ALLOW_4ARGS(__VA_ARGS__, CONCAT_4ARGS, CONCAT_3ARGS, CONCAT_2ARGS, CONCAT_1ARG) (__VA_ARGS__)
+#define CONCAT_1ARG(str1)  str1
+#define CONCAT_2ARGS(str1, str2)  str1##str2
+#define CONCAT_3ARGS(str1, str2, str3)  str1##str2##str3
+#define CONCAT_4ARGS(str1, str2, str3, str4)  str1##str2##str3##str4
 
-#define reset(device, ...)  device##_reset(__VA_ARGS__)
+
+#define reset(device, ...)  CONCAT(device, _reset(__VA_ARGS__)) //device##_reset(__VA_ARGS__)
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -121,15 +127,16 @@
 //handle optional macro params:
 //see https://stackoverflow.com/questions/3046889/optional-parameters-with-c-macros?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
 //for stds way to do it without ##: https://stackoverflow.com/questions/5588855/standard-alternative-to-gccs-va-args-trick?noredirect=1&lq=1
-#define USE_ARG2(one, two, ...)  two
-#define USE_ARG3(one, two, three, ...)  three
-#define USE_ARG4(one, two, three, four, ...)  four
-#define USE_ARG5(one, two, three, four, five, ...)  five
-#define USE_ARG6(one, two, three, four, five, six, ...)  six
-#define USE_ARG7(one, two, three, four, five, six, seven, ...)  seven
-#define USE_ARG8(one, two, three, four, five, six, seven, eight, ...)  eight
-#define USE_ARG9(one, two, three, four, five, six, seven, eight, nine, ...)  nine
-#define USE_ARG10(one, two, three, four, five, six, seven, eight, nine, ten, ...)  ten
+#define ALLOW_1ARG(one, two, ...)  two
+#define ALLOW_2ARGS(one, two, three, ...)  three
+#define ALLOW_3ARGS(one, two, three, four, ...)  four
+#define ALLOW_4ARGS(one, two, three, four, five, ...)  five
+#define ALLOW_5ARGS(one, two, three, four, five, six, ...)  six
+#define ALLOW_6ARGS(one, two, three, four, five, six, seven, ...)  seven
+#define ALLOW_7ARGS(one, two, three, four, five, six, seven, eight, ...)  eight
+#define ALLOW_8ARGS(one, two, three, four, five, six, seven, eight, nine, ...)  nine
+#define ALLOW_9ARGS(one, two, three, four, five, six, seven, eight, nine, ten, ...)  ten
+#define ALLOW_10ARGS(one, two, three, four, five, six, seven, eight, nine, ten, eleven, ...)  eleven
 //etc.
 
 
@@ -177,6 +184,7 @@
 #define BITNUM_0x01  0
 
 
+//log2:
 //;powers of 2 (up to 16):
 //Equivalent to Log2(value) + 1 when only 1 bit of value is set
 //BoostC compiler doesn't handle "?:" operator at compile time, even with constants (it should).
@@ -310,19 +318,49 @@ INLINE void hexchar_WREG()
 
 #ifdef _PORTA
  #define isPORTA(portpin)  (PORTOF(portpin) == _PORTA)
+ #define LATA0_ADDR  LATA_ADDR
+ #define LATA1_ADDR  LATA_ADDR
+ #define LATA2_ADDR  LATA_ADDR
+ #define LATA3_ADDR  LATA_ADDR
+ #define LATA4_ADDR  LATA_ADDR
+ #define LATA5_ADDR  LATA_ADDR
+ #define LATA6_ADDR  LATA_ADDR
+ #define LATA7_ADDR  LATA_ADDR
 #else
  #define isPORTA(ignored)  FALSE
 #endif
 #ifdef _PORTB
  #define isPORTB(portpin)  (PORTOF(portpin) == _PORTB)
+ #define isPORTBC  isPORTB
+ #define LATB0_ADDR  LATB_ADDR
+ #define LATB1_ADDR  LATB_ADDR
+ #define LATB2_ADDR  LATB_ADDR
+ #define LATB3_ADDR  LATB_ADDR
+ #define LATB4_ADDR  LATB_ADDR
+ #define LATB5_ADDR  LATB_ADDR
+ #define LATB6_ADDR  LATB_ADDR
+ #define LATB7_ADDR  LATB_ADDR
 #else
  #define isPORTB(ignored)  FALSE
 #endif
 #ifdef _PORTC
  #define isPORTC(portpin)  (PORTOF(portpin) == _PORTC)
+ #define isPORTBC  isPORTC
+ #define LATC0_ADDR  LATC_ADDR
+ #define LATC1_ADDR  LATC_ADDR
+ #define LATC2_ADDR  LATC_ADDR
+ #define LATC3_ADDR  LATC_ADDR
+ #define LATC4_ADDR  LATC_ADDR
+ #define LATC5_ADDR  LATC_ADDR
+ #define LATC6_ADDR  LATC_ADDR
+ #define LATC7_ADDR  LATC_ADDR
 #else
  #define isPORTC(ignored)  FALSE
 #endif
+#ifndef isPORTBC
+ #define isPORTBC(ignored)  FALSE
+#endif
+
 
 #define PORTAPIN(portpin)  IIFNZ(isPORTA(portpin), PINOF(portpin))
 #define PORTBPIN(portpin)  IIFNZ(isPORTB(portpin), PINOF(portpin))
@@ -334,6 +372,8 @@ INLINE void hexchar_WREG()
 #define PORTBMASK(portpin)  IIFNZ(isPORTB(portpin), 1UL << PINOF(portpin))
 #define PORTCMASK(portpin)  IIFNZ(isPORTC(portpin), 1UL << PINOF(portpin))
 #define PORTBCMASK(portpin)  IIFNZ(isPORTBC(portpin), 1UL << PINOF(portpin))
+#define PINMASK(portpin)  (1 << PINOF(portpin))
+
 
 //encode port A and port B/C into one 16-bit value to allow subsequent split and generic port logic:
 //port A in upper byte, port B/C in lower byte
@@ -346,9 +386,27 @@ INLINE void hexchar_WREG()
 
 
 //allow PORT and TRIS to be indexed by port#:
-volatile __at(PORTA_ADDR - 0xA) uint8_t PORT[0xF - 0xA + 1]; //A - F (subject to device)
-volatile __at(TRISA_ADDR - 0xA) uint8_t TRIS[0xF - 0xA + 1];
+//volatile __at(PORTA_ADDR - 0xA) uint8_t PORT[0xF - 0xA + 1]; //A - F (subject to device)
+//volatile __at(TRISA_ADDR - 0xA) uint8_t TRIS[0xF - 0xA + 1];
+//#define TRISOF(_pin)  IIF(isPORTA(_pin), TRISA, TRISBC)
 
+//select TRIS and PORT bit symbolically:
+//this allows one const to be used for both TRIS and PORT bit vars
+//#define TRISOF(_pin)  IIF(isPORTA(_pin), TRISA, TRISBC)
+#define PORTx(pin)  CONCAT(R, pin) //PORTx_inner(pin)
+//#define PORTx_inner(pin)  R##pin //NOTE: inconsistent name
+#define PORTxBIT(pin)  CONCAT(_R, pin)
+#define PORTxADDR(pin)  CONCAT(PORT, pin, _ADDR)
+
+#define TRISx(pin)  CONCAT(TRIS, pin) //TRISx_inner(pin)
+//#define TRISx_inner(pin)  TRIS##pin
+#define TRISxBIT(pin)  CONCAT(_TRIS, pin) //_##TRISx(pin)
+#define TRISxADDR(pin)  CONCAT(TRIS, pin, _ADDR)
+
+#define LATx(pin)  CONCAT(LAT, pin) //LATx_inner(pin)
+//#define LATx_inner(pin)  LAT##pin
+#define LATxBIT(pin)  CONCAT(_LAT, pin) //_##LATx(pin)
+#define LATxADDR(pin)  CONCAT(LAT, pin, _ADDR)
 
 #endif //ndef _HELPERS_H
 //EOF
