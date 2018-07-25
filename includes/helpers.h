@@ -21,9 +21,9 @@
 //#define CONCAT_INNER(lhs, rhs) lhs##rhs
 #define CONCAT(...)  ALLOW_4ARGS(__VA_ARGS__, CONCAT_4ARGS, CONCAT_3ARGS, CONCAT_2ARGS, CONCAT_1ARG) (__VA_ARGS__)
 #define CONCAT_1ARG(str1)  str1
-#define CONCAT_2ARGS(str1, str2)  str1##str2
-#define CONCAT_3ARGS(str1, str2, str3)  str1##str2##str3
-#define CONCAT_4ARGS(str1, str2, str3, str4)  str1##str2##str3##str4
+#define CONCAT_2ARGS(str1, str2)  str1 ## str2
+#define CONCAT_3ARGS(str1, str2, str3)  str1 ## str2 ## str3
+#define CONCAT_4ARGS(str1, str2, str3, str4)  str1 ## str2 ## str3 ## str4
 
 
 #define reset(device, ...)  CONCAT(device, _reset(__VA_ARGS__)) //device##_reset(__VA_ARGS__)

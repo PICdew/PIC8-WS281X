@@ -112,10 +112,17 @@
 //#include "zc.h"
 //#include "outports.h"
 
-#define VA_COMMA(...)  SIXTH(__VA_ARGS__, COMMA, COMMA, COMMA, COMMA,)
-#define SIXTH(a,b,c,d,e,f, ...)  f
-#define COMMA  .
-#define TEST(...)  ALLOW_3ARGS(/*VA_COMMA(__VA_ARGS)*/, ## __VA_ARGS__, TEST_2ARGS, TEST_1ARG, TEST_0ARGS) (__VA_ARGS__)
+//no worky with sdcc: https://stackoverflow.com/questions/3046889/optional-parameters-with-c-macros :(
+//this one: https://stackoverflow.com/questions/27049491/can-c-c-preprocessor-macros-have-default-parameter-values
+//#define TEST(...)  MACRO_CHOOSER(__VA_ARGS__)(__VA_ARGS__) //, TEST_2ARGS, TEST_1ARG, TEST_0ARGS) (__VA_ARGS__)
+#define xTEST(...)  CHOOSE_FROM_ARG_COUNT(CONCAT(__VA_ARGS__ NO_ARG_EXPANDER), TEST_2ARGS, TEST_1ARG) (__VA_ARGS__)
+#define NO_ARG_EXPANDER  ,,TEST_0ARGS //if no args, expands to: NO_ARG_EXPANDER __VA_ARGS__ ()  // simply shrinks to NO_ARG_EXPANDER()
+//#define MACRO_CHOOSER(...)  CHOOSE_FROM_ARG_COUNT(NO_ARG_EXPANDER ## __VA_ARGS__ (), TEST_2ARGS, TEST_1ARG) //NOTE: inner becomes valid macro if no args
+#define CHOOSE_FROM_ARG_COUNT(one, two, three, ...)  three
+
+#define COMMA  ,
+//#define TEST(...)  ALLOW_2ARGS(CONCAT(__VA_ARGS__ NO_ARG_EXPANDER), TEST_2ARGS, TEST_1ARG, TEST_0ARGS) (__VA_ARGS__)
+#define TEST(...)  ALLOW_2ARGS(THING(__VA_ARGS__), TEST_2ARGS, TEST_1ARG, TEST_0ARGS) (__VA_ARGS__)
 #define TEST_0ARGS()  TEST_1ARG(volatile uint8_t X = 1)
 #define TEST_1ARG(a)  TEST_2ARGS(volatile uint8_t Y = 2, a)
 #define TEST_2ARGS(a, b) { a; b; }
