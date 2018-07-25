@@ -8,6 +8,9 @@ details TBD
 #refs
 DIY compiler: http://lisperator.net/pltut/
 
+DSL rationale:
+http://strd6.com/2012/12/dsls-in-coffeescript/
+
 #resources/examples
 astexplorer.net
 
@@ -24,7 +27,13 @@ https://www.npmjs.com/package/rollup
 
 http://nicolasgallagher.com/custom-css-preprocessing/
 
+https://github.com/camshaft/coffee-dsl
+
+https://medium.com/@jbscript/intro-to-peg-js-writing-parsers-for-custom-dsls-28376a081e1b
+
 #options
+peg.js
+
 https://github.com/acornjs/acorn
 
 https://glot.io/
@@ -39,3 +48,27 @@ https://www.npmjs.com/package/ast-source
 https://superdevelopment.com/2017/07/24/asts-and-javascript-write-code-that-writes-code/
 
 http://www.syntaxsuccess.com/viewarticle/javascript-ast
+
+#other:
+from http://sriku.org/blog/2012/04/14/creating-dsls-in-javascript-using-j-expressions/
+function render(show, duration_ms) {
+    var startTime_ms = Date.now();
+    requestAnimationFrame(function () {
+        var t = Date.now() - startTime_ms;
+        context.draw(show(t));
+        if (t < duration_ms) {
+            requestAnimationFrame(arguments.callee);
+        }
+    });
+}
+function delay(show, dt_ms) {
+    return function (t) {
+        return show(t - dt_ms);
+    };
+}
+
+function cut(when, show1, show2) {
+    return function (t) {
+        return (t < when ? show1 : show2)(t);
+    };
+}
