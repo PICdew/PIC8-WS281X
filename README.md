@@ -31,8 +31,27 @@ https://github.com/camshaft/coffee-dsl
 
 https://medium.com/@jbscript/intro-to-peg-js-writing-parsers-for-custom-dsls-28376a081e1b
 
+https://jlongster.com/Stop-Writing-JavaScript-Compilers--Make-Macros-Instead
+
+https://medium.com/byteagenten/conditional-compilation-for-javascript-using-babel-5a6db5964422
+
+codemods:
+https://webcache.googleusercontent.com/search?q=cache:lRp8k8BTWioJ:https://www.toptal.com/javascript/write-code-to-rewrite-your-code+
+jscodeshift:
+https://github.com/facebook/jscodeshift/wiki/jscodeshift-Documentation
+
 #options
-peg.js
+cpp -P -H: https://news.ycombinator.com/item?id=14296225
+
+https://pegjs.org/
+
+http://mcpp.sourceforge.net/
+
+https://github.com/andrei-markeev/ts2c
+
+https://haxe.org/
+
+https://github.com/PaulBernier/castl
 
 https://github.com/acornjs/acorn
 
