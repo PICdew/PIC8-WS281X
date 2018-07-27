@@ -41,7 +41,16 @@ jscodeshift:
 https://github.com/facebook/jscodeshift/wiki/jscodeshift-Documentation
 
 #options
+https://stackoverflow.com/questions/24459100/turn-javascript-code-into-an-ast
+esprima
+
+https://github.com/ParksProjets/C-Preprocessor
+
 cpp -P -H: https://news.ycombinator.com/item?id=14296225
+
+https://github.com/dcodeIO/Preprocessor.js
+https://github.com/dcodeIO/MetaScript
+https://github.com/cronvel/smart-preprocessor
 
 https://pegjs.org/
 

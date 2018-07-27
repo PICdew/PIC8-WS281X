@@ -1,6 +1,11 @@
+
+"use strict";
+const {Register} = require("./pic-dsl.js");
+
+
 #ifdef pic16f1827
-// #define TRISA_ADDR  0x91
-// #define PORTA_ADDR  0x11
+ #define TRISA_ADDR  0x91
+ #define PORTA_ADDR  0x11
  const TRISA = Register({bits: 0x3f, addr: 0x91, value: 0x3f});
  const PORTA = Register({bits: 0x3f, addr: 0x11, value: 0});
 #endif
@@ -40,6 +45,12 @@ const RA1 = PORTA.BitOf(0x01);
     wait_recurring(timer, rdiv(duration, rdiv(duration, MaxDelay(timer))), if (!--loop) break); /*rdiv again to correct for first rdiv*/ \
 } \
 
+
+module.exports = main; //hoist
+
+
+//var TRISA1, RA1, PORTA;
+function MaskOf(reg) { return reg.bits || 0xff; }
 
 function main()
 {
