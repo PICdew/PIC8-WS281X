@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!./dsl.js
 "use strict";
 function reg(adrs, value)
 {
@@ -36,20 +36,6 @@ function wait_1sec()
     }
 }
 
-
-const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
-console.log(CodeGen(main));
-
-function CodeGen(func)
-{
-    console.log(JSON.stringify(toAST(func), null, "  "));
-//    recursively walk ast;
-//    for each function call, add func to list
-    if (func.toString().match(/main/))
-        console.log(CodeGen(wait_1sec));
-//look up regs; track bank/page
-//emit asm
-}
 
 function include(filename)
 {
