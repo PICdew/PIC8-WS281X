@@ -1,21 +1,25 @@
 
 "use strict";
-const {Register} = require("./pic-dsl.js");
-
-
+//const {Register} = require("./pic-dsl.js");
+/*
+//#include "pic-hw.h"
 #ifdef pic16f1827
  #define TRISA_ADDR  0x91
  #define PORTA_ADDR  0x11
  const TRISA = Register({bits: 0x3f, addr: 0x91, value: 0x3f});
  const PORTA = Register({bits: 0x3f, addr: 0x11, value: 0});
 #endif
-
 const TRISA1 = TRISA.BitOf(0x01);
 const RA1 = PORTA.BitOf(0x01);
+*/
+#define DEVICE  pic16f1827 //TODO: get this from somewhere else (ie, pass in from MPLAB)
+#warning "[INFO] DEVICE ${DEVICE}"
+
+#include `${DEVICE}.h`
 
 #define sec  *1000000
 
-#warning `[INFO] TRISA addr = ${TRISA.addr}`
+#warning "[INFO] TRISA addr = ${TRISA.addr}"
 
 #define wait_once(...)  ALLOW_3ARGS(__VA_ARGS__, wait_once_3ARGS, wait_once_2ARGS, wait_once_1ARG) (__VA_ARGS__)
 #define wait_once_1ARG(duration)  wait_once_2ARGS(duration, ) //busy wait
@@ -41,12 +45,13 @@ const RA1 = PORTA.BitOf(0x01);
 //use delay loop to increase timer limit:
 #define delay_loop(timer, loop_t, duration)  \
 { \
-    const loop = Register({bits: loop_t, bank: none, value: rdiv(duration, MaxDelay(timer))); \
+    const loop = Register({bits: loop_t, bank: none, value: rdiv(duration, MaxDelay(timer))); //hello \
     wait_recurring(timer, rdiv(duration, rdiv(duration, MaxDelay(timer))), if (!--loop) break); /*rdiv again to correct for first rdiv*/ \
-} \
+}
 
 
 module.exports = main; //hoist
+#define TRISA_ADDR  2
 
 
 //var TRISA1, RA1, PORTA;

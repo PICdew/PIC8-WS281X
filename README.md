@@ -80,6 +80,12 @@ https://superdevelopment.com/2017/07/24/asts-and-javascript-write-code-that-writ
 http://www.syntaxsuccess.com/viewarticle/javascript-ast
 
 #other:
+https://babeljs.io/docs/en/babel-cli.html
+
+https://github.com/thlorenz/replpad
+
+https://github.com/thlorenz/scriptie-talkie
+
 from http://sriku.org/blog/2012/04/14/creating-dsls-in-javascript-using-j-expressions/
 function render(show, duration_ms) {
     var startTime_ms = Date.now();
