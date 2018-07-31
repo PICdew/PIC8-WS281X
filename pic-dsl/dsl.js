@@ -4,67 +4,81 @@
 "use strict";
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 //const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-console.error("dsl running ...".green_lt);
-for (var a in process.argv)
-    console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
+//console.error("dsl running ...".green_lt);
 
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
-/// DSL wrapper:
-//
-
-
-const DSL =
-module.exports.DSL =
-function DSL(filename, prefix, suffix)
-{
-    pipeline.pipe(fixups());
-    return pipeline;
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Code generator:
-//
-
-const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
-
-const CodeGen =
-module.exports.CodeGen =
-function CodeGen(func)
-{
-    console.log(JSON.stringify(toAST(func), null, "  "));
-//    recursively walk ast;
-//    for each function call, add func to list
-    if (func.toString().match(/main/))
-        console.log(CodeGen(wait_1sec));
-//look up regs; track bank/page
-//emit asm
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Fix up syntax before processing by Node.js:
+/// DSL stream wrapper:
 //
 
 const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-const {Writable} = require("stream");
+const {/*Readable, Writable,*/ PassThrough} = require("stream");
 const {LineStream} = require('byline');
+//const RequireFromString = require('require-from-string');
+//const CaptureConsole = require("capture-console");
+const REPL = require("repl"); //https://nodejs.org/api/repl.html
 
-function fixups(prefix, suffix)
+
+const DSL =
+module.exports.DSL =
+function DSL(opts) //{filename, replacements, prefix, suffix}
 {
-    const in = new Writable(), out = new Writable;
-    in
-        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
-        .pipe(thru2(xform, flush)) //{ objectMode: true, allowHalfOpen: false },
-        .pipe(out);
+    if (!opts) opts = {};
+//TODO: define custom ops
+//    const instrm = new Readable();
+//    const outstrm = //new Writable();
+//    instrm
+//        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
+//        .pipe(thru2(xform, flush)); //{ objectMode: true, allowHalfOpen: false },
+//        .pipe(outstrm);
 //    retval.infile = infile;
 //    PreProc.latest = retval;
-    return new DuplexStream(out, in); //return endpts; CAUTION: swap in + out
+//    return new DuplexStream(outstrm, instrm); //return endpts; CAUTION: swap in + out
+//    instrm.pipe = function(strm) { return outstrm.pipe(strm); };
+//    return instrm;
+    const instrm = new PassThrough(); //wrapper end-point
+//    const instrm = new LineStream({keepEmptyLines: true}); //preserve line#s (for easier debug)
+    if (opts.debug)
+        for (var a in process.argv)
+            console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
+    var outstrm = instrm
+        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
+        .pipe(thru2(xform, flush)); //syntax fixups
+    if ("run" in opts) //execute logic
+    {
+        const [replin, replout] = [outstrm, new PassThrough()]; //new end-point
+        const repl = REPL.start(
+        {
+            prompt: "", //don't want prompt
+            input: replin, //send output from DSL code to repl
+            output: replout, //send repl output to caller
+//            eval: "tbd",
+//            writer: "tbd",
+            replMode: REPL.REPL_MODE_STRICT, //easier debug
+            ignoreUndefined: true, //only generate real output
+//            useColors: true,
+        });
+//        repl.defineCommand(kywd, func);
+        if (opts.debug) repl
+            .on("exit", data => { if (!data) data = ""; console.error(`repl exit: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+        if (opts.debug) replin
+            .on("data", data => { if (!data) data = ""; console.error(`repl in len ${data.toString().length}: ${data.toString().replace(/\n/gm, "\\n")}`.blue_lt); })
+            .on("end", data => { if (!data) data = ""; console.error(`repl in end: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("finish", data => { if (!data) data = ""; console.error(`repl in finish: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("close", data => { if (!data) data = ""; console.error(`repl in close: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("error", data => { if (!data) data = ""; console.error(`repl in error: ${typeof data} ${data.toString().length}:${data.toString()}`.red_lt); });
+//        const module = RequireFromString()[opts.run]();: new PassThrough());
+        if (opts.debug) replout
+            .on("data", data => { if (!data) data = ""; console.error(`repl out len ${data.toString().length}: ${data.toString().replace(/\n/gm, "\\n")}`.blue_lt); })
+            .on("end", data => { if (!data) data = ""; console.error(`repl out end: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("finish", data => { if (!data) data = ""; console.error(`repl out finish: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("close", data => { if (!data) data = ""; console.error(`repl out close: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
+            .on("error", data => { if (!data) data = ""; console.error(`repl out error: ${typeof data} ${data.toString().length}:${data.toString()}`.red_lt); });
+        outstrm = replout;
+    }
+    return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 
     function xform(chunk, enc, cb)
     {
@@ -88,8 +102,15 @@ function fixups(prefix, suffix)
 //            }
 //            else
             this.linenum = this.numlines;
-//TODO: define custom op
-            this.push(this.linenum + ". " + chunk + "\n"); //add line delimiter
+//            var keep = (opts.replacements || []).every((replace, inx, all) =>
+//            {
+//                if (chunk.match(/^\s*#\s*!/)) chunk = "//" + chunk; //skip shebang
+//            }, this);
+//            if (keep)
+//            chunk = (opts.preprocess || noshebang)(chunk);
+            if (this.linenum == 1) chunk = chunk.replace(/^\s*#\s*!/, "//$&$'"); //skip shebang
+            if (opts.preprocess) chunk = opts.preprocess(chunk);
+            if (chunk) this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter
         }
 //        if (this.buf) //process or flush
 ////        {
@@ -115,14 +136,18 @@ function fixups(prefix, suffix)
     }
     function prepend()
     {
-        if (this.prepended) return; //only do once
-        this.push(prefix || "console.log(\"code start\");\n");
-        this.prepended = true;
+        if (this.numlines) return; //this.prepended) return; //only do once
+        this.push(opts.prefix || "console.log(\"code start\");\n");
+//        this.prepended = true;
     }
+//    function noshebang(str)
+//    {
+//        return str.replace(/^\s*#\s*!/, "//$&$'"); //skip shebang
+//    }
     function append()
     {
         prepend.call(this); //in case not done yet
-        this.push(suffix || "console.log(\"code end\");\n");
+        this.push(opts.suffix || "console.log(\"code end\");\n");
     }
 }
 
@@ -132,6 +157,8 @@ function fixups(prefix, suffix)
 /// Helper functions:
 //
 
+const error =
+module.exports.error =
 function error(msg)
 {
     if (isNaN(++error.count)) error.count = 1;
@@ -139,6 +166,8 @@ function error(msg)
 }
 
 
+const warn =
+module.exports.warn =
 function warn(msg)
 {   
     if (isNaN(++warn.count)) warn.count = 1;
@@ -147,6 +176,8 @@ function warn(msg)
 
 
 //NOTE: hard-coded date/time fmt
+const date2str =
+module.exports.date2str =
 function date2str(when)
 {
     if (!when) when = new Date(); //when ||= new Date(); //Date.now();
@@ -154,6 +185,8 @@ function date2str(when)
 }
 
 
+const nn =
+module.exports.nn =
 function nn(val) { return (val < 10)? "0" + val: val; }
 
 
@@ -180,13 +213,13 @@ if (!module.parent) //auto-run CLI
     const CWD = "";
     const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
     console.error(`DSL: reading from ${filename || "stdin"} ...`.green_lt);
-    const [instrm, outstrm] = [infile? fs.createReadStream(filename.slice(1, -1)): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
+    const [instrm, outstrm] = [filename? fs.createReadStream(filename.slice(1, -1)): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
     instrm
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
-        .pipe(DSL(filename))
+        .pipe(DSL({filename, debug: true, run: "main"}))
 //        .pipe(asm_optimize())
 //    .pipe(text_cleanup())
 //        .pipe(append())
