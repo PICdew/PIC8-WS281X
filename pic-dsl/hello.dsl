@@ -17,10 +17,13 @@ function func1(v)
 
 console.log("hello " + func1(4));
 
-const a = [1, 2, 3];
-a.forEach((v) => { console.log("loop: " + v); });
+function main()
+{
+    const a = [1, 2, 3];
+    a.forEach((v) => { console.log("loop: " + v + func1(v)); });
 
-console.log("args: " + JSON.stringify(process.argv, null, "  "));
+    console.log("args: " + JSON.stringify(process.argv, null, "  "));
+}
 
 //REPL-only:
 console.log("previous: " + _);

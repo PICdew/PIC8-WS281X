@@ -18,6 +18,7 @@ const {/*Readable, Writable,*/ PassThrough} = require("stream");
 const {LineStream} = require('byline');
 //const RequireFromString = require('require-from-string');
 //const CaptureConsole = require("capture-console");
+//const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 const REPL = require("repl"); //https://nodejs.org/api/repl.html
 
 
@@ -77,6 +78,12 @@ function DSL(opts) //{filename, replacements, prefix, suffix}
             .on("close", data => { if (!data) data = ""; console.error(`repl out close: ${typeof data} ${data.toString().length}:${data.toString()}`.cyan_lt); })
             .on("error", data => { if (!data) data = ""; console.error(`repl out error: ${typeof data} ${data.toString().length}:${data.toString()}`.red_lt); });
         outstrm = replout;
+//        outstrm.on("exit", () => { });
+//        console.log(JSON.stringify(toAST(func), null, "  "));
+//    recursively walk ast;
+//    for each function call, add func to list
+//           if (func.toString().match(/main/))
+//             console.log(CodeGen(wait_1sec));
     }
     return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 
@@ -132,6 +139,7 @@ function DSL(opts) //{filename, replacements, prefix, suffix}
 //        dump_macros();
 //        this.push("console.log(\"end\");");
         append.call(this);
+        if (opts.run) this.push(`require("${process.argv[1]}").walkAST(${opts.run});\n`);
         cb();
     }
     function prepend()
@@ -148,6 +156,47 @@ function DSL(opts) //{filename, replacements, prefix, suffix}
     {
         prepend.call(this); //in case not done yet
         this.push(opts.suffix || "console.log(\"code end\");\n");
+    }
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+////
+/// Traverse ast:
+//
+
+const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
+const walkAST =
+module.exports.walkAST =
+function walkAST(entpt)
+{
+    const funclist = [entpt]; //start out with main entry point, add dependent functions during traversal (skips unused functions)
+//recursively walk ast
+//    for each function call, add func to list
+//    if (func.toString().match(/main/))
+//        console.log(CodeGen(wait_1sec));
+    for (var i = 0; i < funclist.length; ++i) //CAUTION: loop size might grow during traversal
+        traverse(funclist[i]);
+
+    function traverse(func)
+    {
+        const ast = toAST(func);
+        expected(func, ast.type, "FunctionExpression");
+        expected(`${func}.id`, ast.id.type, "Identifier");
+        console.log(`const ast_${ast.id.name} = ${JSON.stringify(ast, null, "  ")};\n`);
+        //        if (ast.body.type == "BlockStatement")
+        //            ast.body.body.forEach(stmt =>
+        if (!ast.body) return;
+/*
+        switch (ast.body.type)
+        {
+            case "BlockStatement":
+        }
+*/
+    }
+    function expected(name, what, want, is)
+    {
+        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
     }
 }
 
