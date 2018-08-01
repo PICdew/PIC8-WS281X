@@ -1,4 +1,4 @@
-#!./dsl.js
+#!./dsl.js //comment out this line for .load in Node.js REPL
 "use strict";
 
 include("file.h");

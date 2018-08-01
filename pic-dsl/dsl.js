@@ -139,7 +139,7 @@ function DSL(opts) //{filename, replacements, prefix, suffix}
 //        dump_macros();
 //        this.push("console.log(\"end\");");
         append.call(this);
-        if (opts.run) this.push(`require("${process.argv[1]}").walkAST(${opts.run});\n`);
+        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
         cb();
     }
     function prepend()
@@ -168,36 +168,85 @@ function DSL(opts) //{filename, replacements, prefix, suffix}
 const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 const walkAST =
 module.exports.walkAST =
+//traverse AST, use main() as root:
+//returns array of top-level functions
 function walkAST(entpt)
 {
-    const funclist = [entpt]; //start out with main entry point, add dependent functions during traversal (skips unused functions)
+    const funclist = [entpt], seen = {}; //start out with main entry point, add dependent functions during traversal (skips unused functions)
 //recursively walk ast
 //    for each function call, add func to list
 //    if (func.toString().match(/main/))
 //        console.log(CodeGen(wait_1sec));
     for (var i = 0; i < funclist.length; ++i) //CAUTION: loop size might grow during traversal
-        traverse(funclist[i]);
+    {
+//        funclist[i] = traverse(funclist[i]);
+        const ast = toAST(funclist[i]); //symbol -> AST
+//        expected(funclist[i], ast.type, "FunctionExpression");
+//        expected(`${funclist[i]}.id`, ast.id.type, "Identifier");
+//        console.log(`/*const ast_${ast.id.name} =*/ ${JSON.stringify(ast, null, "  ")};\n`);
+//        if (ast.body.type == "BlockStatement")
+//            ast.body.body.forEach(stmt =>
+        seen[funclist[i]] = ast;
+        console.log(`ast_${funclist[i]} = ${JSON.stringify(ast, null, "  ")}`);
+        traverse(funclist[i], ast, "FunctionExpression");
+    }
+    return funclist.map((item, inx) => { return seen[item]}); //return ASTs to caller, not just symbols
 
-    function traverse(func)
+    function traverse(name, ast_node, want_type)
     {
-        const ast = toAST(func);
-        expected(func, ast.type, "FunctionExpression");
-        expected(`${func}.id`, ast.id.type, "Identifier");
-        console.log(`const ast_${ast.id.name} = ${JSON.stringify(ast, null, "  ")};\n`);
-        //        if (ast.body.type == "BlockStatement")
-        //            ast.body.body.forEach(stmt =>
-        if (!ast.body) return;
-/*
-        switch (ast.body.type)
+        if (want_type && (ast_node.type != want_type)) throw `AST: expected '${name}' to be ${want_type}, not ${ast_node.type}`.red_lt;
+        switch (ast_node.type)
         {
-            case "BlockStatement":
+            case "FunctionExpression": //{id, params[], defaults[], body{}, generator, expression}
+                if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
+                (ast_node.defaults || []).forEach((item, inx, all) => { traverse(`def[${inx}]`, item); });
+                traverse(ast_node.id.name, ast_node.body);
+                break;
+            case "BlockStatement": //{type, body[]}
+//                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
+                (ast_node.body || []).forEach((item, inx, all) => { traverse(`block[${inx}]`, item); });
+                break;
+            case "VariableDeclaration": //{type, declarations[], kind}
+                (ast_node.declarations || []).forEach((item, inx, all) => { traverse(`decl[${inx}]`, item); });
+                break;
+            case "VariableDeclarator": //{type, id, init{}}
+                traverse(ast_node.id.name, ast_node.init);
+                break;
+            case "ArrayExpression": //{type, elements[]}
+                (ast_node.elements || []).forEach((item, inx, all) => { traverse(`item[${inx}]`, item); });
+                break;
+            case "ExpressionStatement": //{type, expression{}}
+                traverse(name, ast_node.expression);
+                break;
+            case "CallExpression": //{type, callee{}, arguments[]}
+                var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
+                console.log(`found call to ${callee}: ${JSON.stringify(ast_node.callee)}, already seen? ${!!seen[callee]}`);
+                if (!seen[callee]) { funclist.push(callee); seen[callee] = toAST(callee); }
+                (ast_node.arguments || []).forEach((item, inx, all) => { traverse(`arg[${inx}]`, item); });
+                break;
+            case "ArrowFunctionExpression": //{type, id, params[], defaults[], body{}, generator, expression}
+                (ast_node.params || []).forEach((item, inx, all) => { traverse(`param[${inx}]`, item); });
+                (ast_node.defaults || []).forEach((item, inx, all) => { traverse(`def[${inx}]`, item); });
+                traverse(name, ast_node.body);
+                break;
+            case "BinaryExpression": //{type, operator, left{}, right{}}
+                traverse("lhs", ast_node.left);
+                traverse("rhs", ast_node.right);
+                break;
+//ignore leafs:
+            case "Identifier": //{type, name}
+            case "Literal" : //{type, value, raw}
+            case "MemberExpression": //{type, computed, object{}, property{}}
+                break;
+            default: //for debug
+                throw `AST: unhandled node type for ${name}: '${ast_node.type}'`.red_lt;
         }
-*/
+//        return ast;
     }
-    function expected(name, what, want, is)
-    {
-        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
-    }
+//    function expected(name, what, want, is)
+//    {
+//        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
+//    }
 }
 
 
