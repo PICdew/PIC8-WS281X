@@ -2,6 +2,7 @@
 //DSL parser for Javascript
 
 "use strict";
+require("magic-globals"); //__file, __line, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 //const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 //console.error("dsl running ...".green_lt);
@@ -9,9 +10,13 @@ require("colors").enabled = true; //for console output; https://github.com/Marak
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
-/// DSL preprocessor (similar to C preprocessor):
+/// DSL preprocessor (similar to C preprocessor except macro names can be regex):
 //
 
+const {LineStream} = require('byline');
+const {/*Readable, Writable,*/ PassThrough} = require("stream");
+const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+const fs = require("fs");
 
 const preproc =
 module.exports.preproc =
@@ -21,12 +26,12 @@ function preproc(opts) //{??}
 //    return thru2(xform, flush); //syntax extensions
     const instrm = new PassThrough(); //wrapper end-point
     var outstrm = instrm
-        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive line-based handling)
+        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s for easier debug, need discrete lines for correct #directive handling
         .pipe(thru2(xform, flush)); //syntax fixups + extensions
 //        repl.defineCommand(kywd, func);
-    outstrm.macro = macro.bind(outstrm);
-    outstrm.sendline = sendline.bind(outstrm);
-    return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+    outstrm.macro = macro; //macro.bind(outstrm);
+    outstrm.sendline = sendline; //sendline.bind(outstrm);
+    return new DuplexStream(outstrm, instrm); //return endpts for caller pipelining; CAUTION: swap in + out
 
     function xform(chunk, enc, cb)
     {
@@ -52,22 +57,26 @@ function preproc(opts) //{??}
         {
             var parts = this.buf.match(/^\s*#\s*([a-z0-9$@_]+)\s*(.*)\s*$/i);
             this.buf = parts? this.macro(parts[1], parts[2], this.linenum): this.macro(this.buf); //handle directives vs. expand macros
-            sendline();
+            this.sendline();
         }
         cb();
     }
     function flush(cb)
     {
-        sendline("\\"); //reinstate line continuation char on last partial line; NOTE: should cause syntax error
+        this.sendline("\\"); //reinstate line continuation char on last partial line; NOTE: should cause syntax error
         const now = new Date(); //Date.now();
 //TODO: why is this.numlines off by 1?
-        this.push(`//eof; lines: ${this.linenum || 0}, warnings: ${warn.count || 0}, errors: ${error.count || 0}, src: ${this.infile}, when: ${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.getHours()}:${nn(now.getMinutes())}:${nn(now.getSeconds())}\n`);
+        this.push(`//lines: ${this.linenum || 0}, ${warn.count? `warnings: ${warn.count}, `: ""}errors: ${error.count || 0}, src: ${opts.filename || "stdin"}, when: ${date2str(now)}\n`);
 //        dump_macros();
         cb();
     }
     function sendline(append)
     {
-        if (this.buf) this.push(this.buf + (append || "") + ` //line ${this.linenum}\n`);
+        if (!this.buf) return;
+//        if (append) this.buf += append;
+//        if (this.linenum != this.previous + 1) this.buf += ` //line ${this.linenum}`;
+        this.push(this.buf + (append || "") + ((this.linenum != this.previous + 1)? ` //line ${this.linenum}`: "") + "\n"); //NOTE: LineStream strips newlines; readd them here
+        this.previous = this.linenum; //avoid redundant line#s
         this.buf = null;
     }
 }
@@ -98,12 +107,12 @@ function macro(cmd, linebuf, linenum)
 */
             return linebuf;
         case "warning": //convert to console output (so that values will be expanded)
-            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
-            return `console.error(${linebuf});`;
+//NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
+            return `console.error(${linebuf.replace(/^\(|\);?$/, "")});`;
         case "error": //convert to console output (so that values will be expanded)
-            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
+//            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
 //            return `console.error(${linebuf}); process.exit(1);`;
-            return `throw ${linebuf}`;
+            return `throw ${linebuf.replace(/^\(|\);?$/, "")};`;
         case "include":
             parts = linebuf.match(/^\s*("([^"]+)"|([^ ])\s?)/);
             if (!parts) return warn(`invalid include file '${linebuf}' on line ${linenum}`);
@@ -142,9 +151,9 @@ function dump_macros()
 //
 
 const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
-const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-const {/*Readable, Writable,*/ PassThrough} = require("stream");
-const {LineStream} = require('byline');
+//const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+//const {/*Readable, Writable,*/ PassThrough} = require("stream");
+//const {LineStream} = require('byline');
 //const RequireFromString = require('require-from-string');
 //const CaptureConsole = require("capture-console");
 //const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
@@ -178,7 +187,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
     }
     var outstrm = instrm
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
-        .pipe(preproc())
+//        .pipe(preproc())
         .pipe(thru2(xform, flush)); //syntax fixups
 /*NOTE: REPL doesn't really add any value - can load module from source code instead
     if ("run" in opts) //execute logic
@@ -230,7 +239,9 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
             if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
             prepend.call(this);
 //            this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
-            this.push(chunk + `; "line ${this.linenum}";\n`); //add line delimiter (and line# for debug)
+//            this.push(chunk + `; "line ${this.linenum}";\n`); //add line delimiter (and line# for debug)
+//            this.push(chunk + "\n"); //NO- add line delimiter (and line# for debug)
+            this.push(chunk);
         }
         cb();
     }
@@ -391,6 +402,8 @@ function walkAST(entpt, ast_cb)
         console.log(JSON.stringify(ast, null, "  "));
     }
 }
+function junk()
+{
 /*
     const funclist = [entpt], seen = {}; //start out with main entry point, add dependent functions during traversal (skips unused functions)
 //recursively walk ast
@@ -504,10 +517,25 @@ function date2str(when)
 }
 
 
+//remove comment:
+//handles // or /**/
+//TODO: handle quoted strings
+function nocomment(str)
+{
+    return str.replace(/(\/\/.*|\/\*.*\*\/)$/, "");
+}
+
+
 //const nn =
 //module.exports.nn =
 function nn(val) { return (val < 10)? "0" + val: val; }
 
+
+function shebang_args(str, which)
+{
+    if (!which) str = str.replace(/\s*#.*$/, ""); //strip comments
+    return (which < 0)? [str]: str.split(" "); //split into separate args
+}
 
 //function is_shebang(chunk)
 //{
@@ -537,24 +565,37 @@ if (!module.parent) //auto-run CLI
     const pathlib = require("path");
     const fs = require("fs");
     const CWD = "";
-    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
-    for (var i = 2; i < process.argv.length - 1; ++i) //additional command line options
-        process.argv[i].split(" ").forEach((arg, inx, all) => { console.log(`arg[${i}/${}].${inx}/${}: '${arg}'`); });
-    const want_src = (process.argv.join("\n").indexOf("-src") != -1);
-    console.error(`DSL: reading from ${filename || "stdin"} ...`.green_lt);
-    const [instrm, outstrm] = [filename? fs.createReadStream(filename.slice(1, -1)): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
+//    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
+    const opts = {}, debug_out = [];
+    for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
+        shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
+        {
+            const argname = `arg[${i}/${process.argv.length}${(all.length != 1)? `,${inx}/${all.length}`: ""}]`;
+            debug_out.push(`${argname}: '${arg}'`); //remember debug output in case wanted (options can be in any order)
+            if (i < 2) return; //skip prog names
+            var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
+            if (!parts || (parts[1] && parts[3])) { console.error(`invalid option in ${argname}: '${arg}'`.red_lt); return; }
+            if (!parts[1] && !parts[4]) opts.filename = parts[2];
+            else opts[parts[2].toLowerCase()] = /*(parts[1] == "-")? false: (parts[1] == "+")*/ parts[1]? true: parts[4];
+        });
+//    console.log(JSON.stringify(opts, null, "  "));
+    if (opts.debug /*!= undefined*/) console.error(debug_out.join("\n").blue_lt);
+    if (opts.help /*!= undefined*/) { console.error(`usage: ${pathlib.basename(__filename)} [+-debug] [+-src] [+-help] [filename]`.yellow_lt); return; }
+    console.error(`DSL: reading from ${opts.filename || "stdin"} ...`.green_lt);
+    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
     instrm
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
-        .pipe(dsl2js({filename, debug: true})) //, run: "main"}))
+        .pipe(preproc(opts))
+        .pipe(dsl2js(opts)) //{filename, debug: true})) //, run: "main"}))
 //        .pipe(asm_optimize())
 //    .pipe(text_cleanup())
 //        .pipe(append())
 //        .pipe(RequireStream())
 //        .pipe(json2ast())
-        .pipe(want_src? new PassThrough(): js2ast())
+        .pipe((opts.src /*!= undefined*/)? new PassThrough(): js2ast(opts))
         .pipe(outstrm)
 //        .on("data", (data) => { console.error(`data: ${data}`.blue_lt)})
         .on("finish", () => { console.error("finish".green_lt); })

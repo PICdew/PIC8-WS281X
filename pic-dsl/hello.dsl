@@ -1,7 +1,7 @@
-#!./dsl.js arg1 arg2 //comment out this line for .load in Node.js REPL
+#!./dsl.js -arg1 -arg2 #comment out this line for .load in Node.js REPL
 //"use strict";
 
-include("file.h");
+include("./hello-helper.dsl");
 
 
 function include(filename)
@@ -15,7 +15,12 @@ function func1(v)
     return v + 3;
 }
 
-console.log("hello " + func1(4));
+console.log("hello " + func1(4)); \
+    console.log("bye");
+#warning "message"
+#warning ("hi")
+#error `${func1(3+4)}`
+#warning func1(5)
 
 function main()
 {

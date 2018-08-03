@@ -17,6 +17,7 @@
     "colors": "git+https://github.com/djulien/colors.js.git",
     "duplex-stream": "^0.1.0",
     "jison": "^0.4.18",
+    "magic-globals": "^0.9.1",
     "require-from-string": "^2.0.2",
     "through2": "^2.0.3",
     "to-ast": "^1.0.0"
