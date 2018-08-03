@@ -1,5 +1,5 @@
-#!./dsl.js //comment out this line for .load in Node.js REPL
-"use strict";
+#!./dsl.js arg1 arg2 //comment out this line for .load in Node.js REPL
+//"use strict";
 
 include("file.h");
 
@@ -26,9 +26,10 @@ function main()
 }
 
 //REPL-only:
-console.log("previous: " + _);
-.help
-.load ./hello-helper.dsl
+//console.log("previous: " + _);
+//.help
+//.load ./hello-helper.dsl
 
+main();
 
 //eof
