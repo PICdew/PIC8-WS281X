@@ -3,29 +3,9 @@
 //MSASM provides all other device-specific knowledge
 //there is no run-time behavior modelled here (sim is out of scope)
 
-#include "pic-hw.h"
-
+#include "pic16x.h"
 
 //PIC16F1827:
-const PIC = MPU(
-{
-//memory pool:
-    banks:
-    {
-        0: {begin: 0x20, end: 0x70},
-        1: {begin: 0xA0, end: 0xF0},
-        2: {begin: 0x120, end: 0x170},
-        shared: {begin: 0x70, end: 0x80},
-    },
-    linear: {begin: 0x2000, end: 0x2000 + this.memlen},
-    memlen: 384, //sanity check
-//clock:
-    osc_def: 500 KHz, //NOTE: MF, not HF!
-    max_extclk: 32 MHz,
-    max_intosc: 8 MHz,
-    has_PLL: true,
-});
-
 //registers:
 //see datasheet for details
 // #define TRISA_ADDR  0x91
@@ -36,5 +16,9 @@ const PORTA = PIC.Reg({bits: 0x3f, addr: 0x11, value: 0});
 //sub-registers (bit definitions):
 const TRISA1 = TRISA.Bit(0x01);
 const RA1 = PORTA.Bit(0x01);
+
+const TMR1 = PIC.Reg({bits: 0xffff, addr: 0xc});
+const PIR1 = PIC.Reg({bits: 0ff, addr: 0x9});
+const T1IF = PIR1.Bit(0x04);
 
 //eof

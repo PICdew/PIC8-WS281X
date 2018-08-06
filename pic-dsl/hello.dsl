@@ -1,14 +1,13 @@
 #!./dsl.js -arg1 -arg2 #comment out this line for .load in Node.js REPL
-//"use strict";
+//NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
-include("./hello-helper.dsl");
-
-
-function include(filename)
-{
-    console.error(`ins '${filename}' contents here`);
-}
-
+//function include(filename) //must be defined before used in REPL
+//{
+//    console.log(`insert '${filename}' contents here`);
+//}
+#include("./hello-helper.dsl");
+#include "./hello-helper.dsl";
+#include "./hello-" + "helper.dsl"
 
 function func1(v)
 {
@@ -25,7 +24,7 @@ console.log("hello " + func1(4)); \
 function main()
 {
     const a = [1, 2, 3];
-    a.forEach((v) => { console.log("loop: " + v + func1(v)); });
+    a.forEach((v) => { console.error("loop: " + v + " " + func1(v)); });
 
     console.log("args: " + JSON.stringify(process.argv, null, "  "));
 }

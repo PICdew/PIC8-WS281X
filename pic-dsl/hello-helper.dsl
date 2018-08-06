@@ -1,11 +1,11 @@
-"use strict";
+//no "use strict";
 
 console.log("hello helper ...");
 
-function helper()
+function helper(x)
 {
-    console.log("helper");
+    console.log("helper(" + typeof x + " " + x + ")");
 }
 
 console.log("... hello helper");
-//eof
+//eof hello-helper.dsl

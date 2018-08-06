@@ -10,13 +10,41 @@ require("colors").enabled = true; //for console output; https://github.com/Marak
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
+/// Wrap Javascript REPL as a stream:
+//
+
+const {/*Readable, Writable,*/ PassThrough} = require("stream");
+const REPL = require("repl"); //https://nodejs.org/api/repl.html
+
+const ReplStream =
+module.exports.ReplStream =
+function ReplStream(opts) //{tbd}
+{
+    const replin = new PassThrough(), replout = new PassThrough(); //REPL end-points
+    const repl = REPL.start(
+    {
+        prompt: "", //don't want prompt
+        input: replin, //send input stream to REPL
+        output: replout, //send REPL output to next stage in pipeline
+//            eval: "tbd",
+//            writer: "tbd",
+        replMode: REPL.REPL_MODE_STRICT, //easier debug
+        ignoreUndefined: true, //only generate real output
+//            useColors: true,
+    });
+    return new DuplexStream(replout, replin); //return endpts so caller can do more pipelining; CAUTION: in/out direction here
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+////
 /// DSL preprocessor (similar to C preprocessor except macro names can be regex):
 //
 
 const {LineStream} = require('byline');
-const {/*Readable, Writable,*/ PassThrough} = require("stream");
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 const fs = require("fs");
+//const CaptureConsole = require('capture-console');
 
 const preproc =
 module.exports.preproc =
@@ -25,19 +53,43 @@ function preproc(opts) //{??}
     if (!opts) opts = {};
 //    return thru2(xform, flush); //syntax extensions
     const instrm = new PassThrough(); //wrapper end-point
-    var outstrm = instrm
+    const outstrm = instrm
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s for easier debug, need discrete lines for correct #directive handling
         .pipe(thru2(xform, flush)); //syntax fixups + extensions
 //        repl.defineCommand(kywd, func);
     outstrm.macro = macro; //macro.bind(outstrm);
     outstrm.sendline = sendline; //sendline.bind(outstrm);
-    return new DuplexStream(outstrm, instrm); //return endpts for caller pipelining; CAUTION: swap in + out
+    outstrm.push_echo = opts.echo? function(str) { console.error(`echo: ${str.replace(/\n/mg, "\\n").cyan_lt}`); this.push(str); }: outstrm.push;
+    outstrm.prefix = prefix;
+    outstrm.suffix = suffix;
+
+//use REPL to evalute #if and conditionals:
+    const replout = new PassThrough(); //new end-point
+    const repl = REPL.start(
+    {
+        prompt: "", //don't want prompt
+        input: outstrm, //send preprocessed output to REPL
+        output: replout, //send repl output to caller
+//            eval: "tbd",
+//            writer: "tbd",
+        replMode: REPL.REPL_MODE_STRICT, //easier debug
+        ignoreUndefined: true, //only generate real output
+//            useColors: true,
+    });
+//    outstrm = replout;
+    //        outstrm.on("exit", () => { });
+    //        console.log(JSON.stringify(toAST(func), null, "  "));
+    //    recursively walk ast;
+    //    for each function call, add func to list
+    //           if (func.toString().match(/main/))
+    //             console.log(CodeGen(wait_1sec));
+    return new DuplexStream(replout, instrm); //return endpts so caller can do more pipelining; CAUTION: in/out direction here
 
     function xform(chunk, enc, cb)
     {
         if (isNaN(++this.numlines)) this.numlines = 1;
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-        if ((this.numlines == 1) && chunk.match(/^\s*#\s*!/)) { this.push(chunk + "\n"); cb(); return; } //leave as-is
+        if ((this.numlines == 1) && chunk.match(/^\s*#\s*!/)) { this.push(`//${chunk}\n`); cb(); return; } //comment out shebang
 //        chunk = chunk.replace(/[{,]\s*([a-z\d]+)\s*:/g, (match, val) => { return match[0] + '"' + val + '":'; }); //JSON fixup: numeric keys need to be quoted :(
         if (chunk.length)
         {
@@ -55,7 +107,7 @@ function preproc(opts) //{??}
 //        this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
         if (this.buf) //process or flush
         {
-            var parts = this.buf.match(/^\s*#\s*([a-z0-9$@_]+)\s*(.*)\s*$/i);
+            var parts = this.buf.match(/^\s*#\s*([a-z0-9$@_]+)\s*(.*)\s*$/i); //look for macro #directive
             this.buf = parts? this.macro(parts[1], parts[2], this.linenum): this.macro(this.buf); //handle directives vs. expand macros
             this.sendline();
         }
@@ -67,7 +119,8 @@ function preproc(opts) //{??}
         const now = new Date(); //Date.now();
 //TODO: why is this.numlines off by 1?
         this.push(`//lines: ${this.linenum || 0}, ${warn.count? `warnings: ${warn.count}, `: ""}errors: ${error.count || 0}, src: ${opts.filename || "stdin"}, when: ${date2str(now)}\n`);
-//        dump_macros();
+        this.suffix();
+        if (opts.debug) dump_macros();
         cb();
     }
     function sendline(append)
@@ -75,9 +128,28 @@ function preproc(opts) //{??}
         if (!this.buf) return;
 //        if (append) this.buf += append;
 //        if (this.linenum != this.previous + 1) this.buf += ` //line ${this.linenum}`;
-        this.push(this.buf + (append || "") + ((this.linenum != this.previous + 1)? ` //line ${this.linenum}`: "") + "\n"); //NOTE: LineStream strips newlines; readd them here
+        this.prefix();
+        const line_tracking = (this.linenum != this.previous + 1)? ` //line ${this.linenum}`: null; //useful for debug
+        this.push_echo(`${this.buf}${append || ""}${line_tracking || ""}\n`); //NOTE: LineStream strips newlines; re-add them here
         this.previous = this.linenum; //avoid redundant line#s
         this.buf = null;
+    }
+    function prefix()
+    {
+        this.prefix = function() {}; //only need prefix once; CAUTION: do this first to avoid recursion
+        this.push("const {dsl_include} = require('./dsl.js');\n");
+        this.push("const CaptureConsole = require('capture-console');\n");
+//        this.push("const toAST = require('to-ast');\n"); //https://github.com/devongovett/to-ast
+//        this.push("CaptureConsole.startCapture(process.stdout, (outbuf) => { console.error(`stdout: '${outbuf.replace(/\n/gm, '\\n')}'`); process.stdin.push(outbuf); });\n");
+        this.push("CaptureConsole.startCapture(process.stdout, (outbuf) => { outstrm.write(outbuf); });\n");
+    }
+    function suffix()
+    {
+        this.prefix(); //make sure this is done first
+//        this.push(".save dj.txt\n");
+//        this.push("const suffix = true;\n");
+        this.push("CaptureConsole.stopCapture(process.stdout);\n");
+//        this.push("JSON.stringify(toAST(main), null, '  ');\n");
     }
 }
 
@@ -87,7 +159,7 @@ function macro(cmd, linebuf, linenum)
 {
     var parts;
     if (arguments.length == 1) [cmd, linebuf] = [null, cmd];
-//console.log("macro cmd " + cmd + ", line " + linenum);
+//console.log(`macro: cmd '${cmd}', line '${(linebuf || "").replace(/\n/gm, "\\n")}'`);
     switch (cmd)
     {
 //        case "define"
@@ -108,18 +180,19 @@ function macro(cmd, linebuf, linenum)
             return linebuf;
         case "warning": //convert to console output (so that values will be expanded)
 //NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
-            return `console.error(${linebuf.replace(/^\(|\);?$/, "")});`;
+            return `console.error(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
         case "error": //convert to console output (so that values will be expanded)
 //            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
 //            return `console.error(${linebuf}); process.exit(1);`;
-            return `throw ${linebuf.replace(/^\(|\);?$/, "")};`;
-        case "include":
-            parts = linebuf.match(/^\s*("([^"]+)"|([^ ])\s?)/);
-            if (!parts) return warn(`invalid include file '${linebuf}' on line ${linenum}`);
+            return `throw ${linebuf}`; //leave quotes, parens as is
+        case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
+//            parts = linebuf.match(/^\s*("([^"]+)"|([^ ])\s?)/);
+//            if (!parts) return warn(`invalid include file '${linebuf}' on line ${linenum}`);
 //            const [instrm, outstrm] = [infile? fs.createReadStream(infile.slice(1, -1)): process.stdin, process.stdout];
-console.error(`read file '${parts[2] || parts[3]}' ...`);
-            var contents = fs.readFileSync(parts[2] || parts[3]); //assumes file is small; contents needed in order to expand nested macros so just use sync read
-            return contents;
+//console.error(`read file '${parts[2] || parts[3]}' ...`);
+//            var contents = fs.readFileSync(parts[2] || parts[3]); //assumes file is small; contents needed in order to expand nested macros so just use sync read
+//            return contents;
+            return `dsl_include(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
         case "define": //save for later expansion
             if (!macro.defs) macro.defs = {};
             parts = linebuf.match(/^([a-z0-9_]+)\s*(\(\s*([^)]*)\s*\)\s*)?(.*)$/i);
@@ -131,6 +204,10 @@ console.error(`read file '${parts[2] || parts[3]}' ...`);
             warn(`ignoring unrecognized pre-processor directive '${cmd}' (line ${linenum})`);
             return linebuf;
     }
+    function str_trim(str) //trim quotes and trailing semi-colon; NOTE: assumes only 1 param
+    {
+        return str.replace(/;\s*$/, "").replace(/^\s*\(\s*(.*)\s*\)\s*$/, "$1");
+    }
 }
 
 
@@ -140,8 +217,17 @@ function dump_macros()
     for (var m in macro.defs || {})
     {
         var has_args = macro.defs[m][0];
-        console.error(`macro '${m.cyan_lt + "".blue_lt}': ${has_args? "(" + macro.defs[m].arglist + ")": ""} '${macro.defs[m].body} line ${macro.defs[m].linenum}'`.blue_lt);
+        console.error(`macro '${m.cyan_lt + "".blue_lt}': ${has_args? "(" + macro.defs[m].arglist + ")": ""} '${macro.defs[m].body} line ${macro.defs[m].linenum}'`.pink_lt);
     }
+}
+
+
+const dsl_include =
+module.exports.dsl_include =
+function dsl_include(filename)
+{
+    console.log(`//contents of '${filename}':\n`);
+    console.log(fs.readFileSync(filename).toString()); //assumes file is small; contents needed in order to expand nested macros so just use sync read
 }
 
 
@@ -343,6 +429,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 /// Transform Javascript source code into JSON AST (stream):
 //
 
+/*
 //const {collect} = require("collect-stream"); //https://github.com/juliangruber/collect-stream
 const RequireFromString = require('require-from-string'); //https://github.com/floatdrop/require-from-string
 const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
@@ -380,6 +467,7 @@ function js2ast(opts)
         cb();
     }
 }
+*/
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -580,7 +668,7 @@ if (!module.parent) //auto-run CLI
         });
 //    console.log(JSON.stringify(opts, null, "  "));
     if (opts.debug /*!= undefined*/) console.error(debug_out.join("\n").blue_lt);
-    if (opts.help /*!= undefined*/) { console.error(`usage: ${pathlib.basename(__filename)} [+-debug] [+-src] [+-help] [filename]`.yellow_lt); return; }
+    if (opts.help /*!= undefined*/) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
     console.error(`DSL: reading from ${opts.filename || "stdin"} ...`.green_lt);
     const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
     instrm
@@ -588,14 +676,16 @@ if (!module.parent) //auto-run CLI
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
-        .pipe(preproc(opts))
-        .pipe(dsl2js(opts)) //{filename, debug: true})) //, run: "main"}))
+//        .pipe(preproc(opts))
+        .pipe(ReplStream(opts))
+//        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
+//        .pipe((!opts.src && !opts.codegen)? js2ast(opts): new PassThrough())
 //        .pipe(asm_optimize())
 //    .pipe(text_cleanup())
 //        .pipe(append())
 //        .pipe(RequireStream())
 //        .pipe(json2ast())
-        .pipe((opts.src /*!= undefined*/)? new PassThrough(): js2ast(opts))
+//        .pipe((opts.codegen /*!= undefined*/)? new PassThrough(): js2ast(opts))
         .pipe(outstrm)
 //        .on("data", (data) => { console.error(`data: ${data}`.blue_lt)})
         .on("finish", () => { console.error("finish".green_lt); })
@@ -609,5 +699,8 @@ if (!module.parent) //auto-run CLI
         });
     console.error("DSL: finish asynchronously".green_lt);
 }
+//                  ____________________________
+//                 /                            \
+//file or stdin ---\--> macro expand -> REPL ---/----> AST
 
 //eof

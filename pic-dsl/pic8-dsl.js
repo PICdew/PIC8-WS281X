@@ -2,7 +2,7 @@
 //Javascript-based PIC DSL
 
 "use strict";
-const {DSL} = require("./dsl");
+const {DSL} = require("./dsl.js");
 
 
 /////////////////////////////////////////////////////////////////////////////////
