@@ -4,231 +4,6 @@
 "use strict";
 require("magic-globals"); //__file, __line, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-//const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-//console.error("dsl running ...".green_lt);
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Wrap Javascript REPL as a stream:
-//
-
-const {/*Readable, Writable,*/ PassThrough} = require("stream");
-const REPL = require("repl"); //https://nodejs.org/api/repl.html
-
-const ReplStream =
-module.exports.ReplStream =
-function ReplStream(opts) //{tbd}
-{
-    const replin = new PassThrough(), replout = new PassThrough(); //REPL end-points
-    const repl = REPL.start(
-    {
-        prompt: "", //don't want prompt
-        input: replin, //send input stream to REPL
-        output: replout, //send REPL output to next stage in pipeline
-//            eval: "tbd",
-//            writer: "tbd",
-        replMode: REPL.REPL_MODE_STRICT, //easier debug
-        ignoreUndefined: true, //only generate real output
-//            useColors: true,
-    });
-    return new DuplexStream(replout, replin); //return endpts so caller can do more pipelining; CAUTION: in/out direction here
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// DSL preprocessor (similar to C preprocessor except macro names can be regex):
-//
-
-const {LineStream} = require('byline');
-const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-const fs = require("fs");
-//const CaptureConsole = require('capture-console');
-
-const preproc =
-module.exports.preproc =
-function preproc(opts) //{??}
-{
-    if (!opts) opts = {};
-//    return thru2(xform, flush); //syntax extensions
-    const instrm = new PassThrough(); //wrapper end-point
-    const outstrm = instrm
-        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s for easier debug, need discrete lines for correct #directive handling
-        .pipe(thru2(xform, flush)); //syntax fixups + extensions
-//        repl.defineCommand(kywd, func);
-    outstrm.macro = macro; //macro.bind(outstrm);
-    outstrm.sendline = sendline; //sendline.bind(outstrm);
-    outstrm.push_echo = opts.echo? function(str) { console.error(`echo: ${str.replace(/\n/mg, "\\n").cyan_lt}`); this.push(str); }: outstrm.push;
-    outstrm.prefix = prefix;
-    outstrm.suffix = suffix;
-
-//use REPL to evalute #if and conditionals:
-    const replout = new PassThrough(); //new end-point
-    const repl = REPL.start(
-    {
-        prompt: "", //don't want prompt
-        input: outstrm, //send preprocessed output to REPL
-        output: replout, //send repl output to caller
-//            eval: "tbd",
-//            writer: "tbd",
-        replMode: REPL.REPL_MODE_STRICT, //easier debug
-        ignoreUndefined: true, //only generate real output
-//            useColors: true,
-    });
-//    outstrm = replout;
-    //        outstrm.on("exit", () => { });
-    //        console.log(JSON.stringify(toAST(func), null, "  "));
-    //    recursively walk ast;
-    //    for each function call, add func to list
-    //           if (func.toString().match(/main/))
-    //             console.log(CodeGen(wait_1sec));
-    return new DuplexStream(replout, instrm); //return endpts so caller can do more pipelining; CAUTION: in/out direction here
-
-    function xform(chunk, enc, cb)
-    {
-        if (isNaN(++this.numlines)) this.numlines = 1;
-        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-        if ((this.numlines == 1) && chunk.match(/^\s*#\s*!/)) { this.push(`//${chunk}\n`); cb(); return; } //comment out shebang
-//        chunk = chunk.replace(/[{,]\s*([a-z\d]+)\s*:/g, (match, val) => { return match[0] + '"' + val + '":'; }); //JSON fixup: numeric keys need to be quoted :(
-        if (chunk.length)
-        {
-            if (!this.buf) this.linenum = this.numlines; //remember start line# of continued lines
-            this.buf = (this.buf || "") + chunk; //.slice(0, -1);
-//console.error(`line ${this.numlines}: last char ${this.buf.slice(-1)}`);
-            if (chunk.slice(-1) == "\\") //line continuation (mainly for macros)
-            {
-                if (chunk.indexOf("//") != -1) warn(`single-line comment on ${this.numlines} interferes with line continuation`);
-                this.buf = this.buf.slice(0, -1);
-                cb();
-                return;
-            }
-        }
-//        this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
-        if (this.buf) //process or flush
-        {
-            var parts = this.buf.match(/^\s*#\s*([a-z0-9$@_]+)\s*(.*)\s*$/i); //look for macro #directive
-            this.buf = parts? this.macro(parts[1], parts[2], this.linenum): this.macro(this.buf); //handle directives vs. expand macros
-            this.sendline();
-        }
-        cb();
-    }
-    function flush(cb)
-    {
-        this.sendline("\\"); //reinstate line continuation char on last partial line; NOTE: should cause syntax error
-        const now = new Date(); //Date.now();
-//TODO: why is this.numlines off by 1?
-        this.push(`//lines: ${this.linenum || 0}, ${warn.count? `warnings: ${warn.count}, `: ""}errors: ${error.count || 0}, src: ${opts.filename || "stdin"}, when: ${date2str(now)}\n`);
-        this.suffix();
-        if (opts.debug) dump_macros();
-        cb();
-    }
-    function sendline(append)
-    {
-        if (!this.buf) return;
-//        if (append) this.buf += append;
-//        if (this.linenum != this.previous + 1) this.buf += ` //line ${this.linenum}`;
-        this.prefix();
-        const line_tracking = (this.linenum != this.previous + 1)? ` //line ${this.linenum}`: null; //useful for debug
-        this.push_echo(`${this.buf}${append || ""}${line_tracking || ""}\n`); //NOTE: LineStream strips newlines; re-add them here
-        this.previous = this.linenum; //avoid redundant line#s
-        this.buf = null;
-    }
-    function prefix()
-    {
-        this.prefix = function() {}; //only need prefix once; CAUTION: do this first to avoid recursion
-        this.push("const {dsl_include} = require('./dsl.js');\n");
-        this.push("const CaptureConsole = require('capture-console');\n");
-//        this.push("const toAST = require('to-ast');\n"); //https://github.com/devongovett/to-ast
-//        this.push("CaptureConsole.startCapture(process.stdout, (outbuf) => { console.error(`stdout: '${outbuf.replace(/\n/gm, '\\n')}'`); process.stdin.push(outbuf); });\n");
-        this.push("CaptureConsole.startCapture(process.stdout, (outbuf) => { outstrm.write(outbuf); });\n");
-    }
-    function suffix()
-    {
-        this.prefix(); //make sure this is done first
-//        this.push(".save dj.txt\n");
-//        this.push("const suffix = true;\n");
-        this.push("CaptureConsole.stopCapture(process.stdout);\n");
-//        this.push("JSON.stringify(toAST(main), null, '  ');\n");
-    }
-}
-
-
-//store or expand macros:
-function macro(cmd, linebuf, linenum)
-{
-    var parts;
-    if (arguments.length == 1) [cmd, linebuf] = [null, cmd];
-//console.log(`macro: cmd '${cmd}', line '${(linebuf || "").replace(/\n/gm, "\\n")}'`);
-    switch (cmd)
-    {
-//        case "define"
-        case null: //expand macros
-/*
-            for (;;) //keep expanding while there is more to do
-            {
-                var expanded = 0;
-                for (var m in macro.defs || {})
-                {
-                    break;
-                    if (macro.defs[m].arglist !== null) //with arg list
-                        linebuf.replace()
-                }
-                break;
-            }
-*/
-            return linebuf;
-        case "warning": //convert to console output (so that values will be expanded)
-//NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
-            return `console.error(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
-        case "error": //convert to console output (so that values will be expanded)
-//            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
-//            return `console.error(${linebuf}); process.exit(1);`;
-            return `throw ${linebuf}`; //leave quotes, parens as is
-        case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
-//            parts = linebuf.match(/^\s*("([^"]+)"|([^ ])\s?)/);
-//            if (!parts) return warn(`invalid include file '${linebuf}' on line ${linenum}`);
-//            const [instrm, outstrm] = [infile? fs.createReadStream(infile.slice(1, -1)): process.stdin, process.stdout];
-//console.error(`read file '${parts[2] || parts[3]}' ...`);
-//            var contents = fs.readFileSync(parts[2] || parts[3]); //assumes file is small; contents needed in order to expand nested macros so just use sync read
-//            return contents;
-            return `dsl_include(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
-        case "define": //save for later expansion
-            if (!macro.defs) macro.defs = {};
-            parts = linebuf.match(/^([a-z0-9_]+)\s*(\(\s*([^)]*)\s*\)\s*)?(.*)$/i);
-            if (!parts) warn(`invalid macro definition ignored on line ${linenum}`);
-            else if (macro.defs[parts[1]]) warn(`duplicate macro '${parts[1]}' definition (line ${linenum}, prior was ${macro.defs[parts[1]].linenum})`);
-            else macro.defs[parts[1]] = {arglist: parts[3], body: parts[4], linenum};
-            return; //no output
-        default:
-            warn(`ignoring unrecognized pre-processor directive '${cmd}' (line ${linenum})`);
-            return linebuf;
-    }
-    function str_trim(str) //trim quotes and trailing semi-colon; NOTE: assumes only 1 param
-    {
-        return str.replace(/;\s*$/, "").replace(/^\s*\(\s*(.*)\s*\)\s*$/, "$1");
-    }
-}
-
-
-function dump_macros()
-{
-//    Object.keys(macro.defs || {}).forEach(m =>
-    for (var m in macro.defs || {})
-    {
-        var has_args = macro.defs[m][0];
-        console.error(`macro '${m.cyan_lt + "".blue_lt}': ${has_args? "(" + macro.defs[m].arglist + ")": ""} '${macro.defs[m].body} line ${macro.defs[m].linenum}'`.pink_lt);
-    }
-}
-
-
-const dsl_include =
-module.exports.dsl_include =
-function dsl_include(filename)
-{
-    console.log(`//contents of '${filename}':\n`);
-    console.log(fs.readFileSync(filename).toString()); //assumes file is small; contents needed in order to expand nested macros so just use sync read
-}
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -236,13 +11,13 @@ function dsl_include(filename)
 /// Transform DSL source code to Javascript (stream):
 //
 
+const {LineStream} = require('byline');
 const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
-//const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-//const {/*Readable, Writable,*/ PassThrough} = require("stream");
-//const {LineStream} = require('byline');
-//const RequireFromString = require('require-from-string');
+const {/*Readable, Writable,*/ PassThrough} = require("stream");
+const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+const RequireFromString = require('require-from-string');
 //const CaptureConsole = require("capture-console");
-//const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
+const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 //const REPL = require("repl"); //https://nodejs.org/api/repl.html
 
 
@@ -271,8 +46,8 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
         for (var a in process.argv)
             console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
     }
-    var outstrm = instrm
-//        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
+    const outstrm = instrm
+        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
         .pipe(thru2(xform, flush)); //syntax fixups
 /*NOTE: REPL doesn't really add any value - can load module from source code instead
@@ -315,261 +90,307 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 //             console.log(CodeGen(wait_1sec));
     }
 */
+    outstrm.prefix = prefix;
+    outstrm.suffix = suffix;
     return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 
     function xform(chunk, enc, cb)
     {
+        if (!this.chunks) this.chunks = [];
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
+        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push("//" + /*chunk.length + ":" +*/ chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
         if (chunk.length)
         {
-            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
-            prepend.call(this);
+//            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.chunks.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
+//            prepend.call(this);
 //            this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
 //            this.push(chunk + `; "line ${this.linenum}";\n`); //add line delimiter (and line# for debug)
 //            this.push(chunk + "\n"); //NO- add line delimiter (and line# for debug)
-            this.push(chunk);
+            this.prefix();
+            this.chunks.push(chunk);
+//            this.push(chunk);
         }
         cb();
     }
     function flush(cb)
     {
-        append.call(this);
-        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
-        cb();
-    }
-
-    function xxform(chunk, enc, cb)
-    {
-        if (isNaN(++this.numlines)) this.numlines = 1;
-        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-//        chunk = chunk.replace(/[{,]\s*([a-z\d]+)\s*:/g, (match, val) => { return match[0] + '"' + val + '":'; }); //JSON fixup: numeric keys need to be quoted :(
-//        inject.call(this);
-        if (chunk.length)
+//        append.call(this);
+//        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
+        if (this.chunks)
         {
-//            if (!this.buf) this.linenum = this.numlines;
-//            this.buf = (this.buf || "") + chunk; //.slice(0, -1);
-//console.error(`line ${this.numlines}: last char ${this.buf.slice(-1)}`);
-//            if (chunk.slice(-1) == "\\") //line continuation (mainly for macros)
-//            {
-//                if (chunk.indexOf("//") != -1) warn(`single-line comment on ${this.numlines} interferes with line continuation`);
-  //              this.buf = this.buf.slice(0, -1);
-//                this.push(chunk.slice(0, -1)); //drop backslash and don't send newline
-//                cb();
-//                return;
-//            }
-//            else
-            this.linenum = this.numlines;
-//            var keep = (opts.replacements || []).every((replace, inx, all) =>
-//            {
-//                if (chunk.match(/^\s*#\s*!/)) chunk = "//" + chunk; //skip shebang
-//            }, this);
-//            if (keep)
-//            chunk = (opts.preprocess || noshebang)(chunk);
-//            if (!opts.shebang && (this.linenum == 1)) chunk = chunk.replace(/^\s*#\s*!/, "//$&$'"); //skip shebang
-//            if (parts = chunk.match(/^\s*#\s*([^ ]+))) //preprocessor directive
-//            {
-//
-//            }
-//            if (opts.preprocess) chunk = opts.preprocess(chunk);
-            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
-            prepend.call(this);
-//            this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
-            this.push(chunk + `; "line ${this.linenum}";\n`); //add line delimiter (and line# for debug)
-}
-//        if (this.buf) //process or flush
-////        {
-//            var parts = this.buf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
-//            this.buf = parts? macro(parts[1], parts[2], this.linenum): macro(this.buf); //handle directives vs. expand macros
-//            if (this.buf) this.push(/-*this.linenum + ": " +*-/ this.buf + "\n");
-//            this.buf = null;
-//        }
-//        this.push(chunk);
-        cb();
-    }
-    function xflush(cb)
-    {
-//        inject.call(this);
-//        const now = new Date(); //Date.now();
-//        if (this.buf) this.push(this.buf + "\\\n"); //reinstate line continuation char on last partial line
-//TODO: why is this.numlines off by 1?
-//        this.push(`//eof; lines: ${this.linenum || 0}, warnings: ${warn.count || 0}, errors: ${error.count || 0}, src: ${this.infile}, when: ${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.getHours()}:${nn(now.getMinutes())}:${nn(now.getSeconds())}\n`);
-//        dump_macros();
-//        this.push("console.log(\"end\");");
-        append.call(this);
-        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
-        cb();
-    }
-    function prepend()
-    {
-        if (this.prepended) return; //this.prepended) return; //only do once
-//var dcls at global scope requires either entire source to be executed, or traverse ast and extract var dcls
-//        this.push("function dsl_wrapper()\n{\n\"use strict\";\n");
-        this.push("module.exports = function()\n{\n\"use strict\";\n");
-//        this.push("require(\"dsl.js\").ast(\nfunction()\n{\n"})
-        this.push(opts.prefix || "console.log(\"code start\");\n");
-        this.prepended = true;
-    }
-//    function noshebang(str)
-//    {
-//        return str.replace(/^\s*#\s*!/, "//$&$'"); //skip shebang
-//    }
-    function append()
-    {
-        prepend.call(this); //in case not done yet
-        this.push(opts.suffix || "console.log(\"code end\");\n");
-//        this.push("}\nrequire(\"to-ast\")(dsl_wrapper);\n");
-//        this.push("}\nrequire(\"./dsl.js\").walkAST(dsl_wrapper, ast_cb);\n");
-        this.push("}\n");
-    }
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Transform Javascript source code into JSON AST (stream):
-//
-
-/*
-//const {collect} = require("collect-stream"); //https://github.com/juliangruber/collect-stream
-const RequireFromString = require('require-from-string'); //https://github.com/floatdrop/require-from-string
-const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
-
-const js2ast =
-module.exports.js2ast =
-function js2ast(opts)
-{
-//    const retval = thru2(xform, flush); //{ objectMode: true, allowHalfOpen: false },
-//    const retval = new PassThrough(); //collector end-point for use with pipeline
-//    collect(retval, (err, data) => { console.error(`req2str: write ${data.length} to passthru`); retval.write(data); });
-//based on example from https://stackoverflow.com/questions/10623798/writing-node-js-stream-into-a-string-variable
-//    const chunks = [];
-//    retval.on("data", (chunk) => { chunks.push(chunk); });
-//    retval.on("end", () =>
-//    {
-//        const ast = toAST(entpt); //NOTE: only generates AST for one function, so make it a wrapper to everything of interest
-//        const ast = toAST(RequireFromString(Buffer.concat(chunks).toString()));
-//    });
-    return thru2(xform, flush); //{ objectMode: true, allowHalfOpen: false },
-
-    function xform(chunk, enc, cb) //collect stream in memory
-    {
-        if (!this.chunks) this.chunks = [];
-        this.chunks.push(chunk);
-        cb();
-    }
-    function flush(cb) //compile buffered using require(), emit AST as JSON
-    {
-        const code = Buffer.concat(this.chunks || []).toString(); //CAUTION: could use a lot of memory
-        const compile = RequireFromString(code);
-        const ast = toAST(compile);
-        const json = JSON.stringify(ast, null, "  ");
-        this.push(json);
-        cb();
-    }
-}
-*/
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Traverse ast:
-//
-
-//const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
-const walkAST =
-module.exports.walkAST =
-//traverse AST, use main() as root:
-//returns array of top-level functions
-function walkAST(entpt, ast_cb)
-{
-    const ast = toAST(entpt); //NOTE: only generates AST for one function, so make it a wrapper to everything of interest
-    (ast_cb || ast2json)(ast);
-    
-    function ast2json(ast)
-    {
-        console.log(JSON.stringify(ast, null, "  "));
-    }
-}
-function junk()
-{
-/*
-    const funclist = [entpt], seen = {}; //start out with main entry point, add dependent functions during traversal (skips unused functions)
-//recursively walk ast
-//    for each function call, add func to list
-//    if (func.toString().match(/main/))
-//        console.log(CodeGen(wait_1sec));
-    for (var i = 0; i < funclist.length; ++i) //CAUTION: loop size might grow during traversal
-    {
-//        funclist[i] = traverse(funclist[i]);
-        const ast = toAST(funclist[i]); //symbol -> AST
-//        expected(funclist[i], ast.type, "FunctionExpression");
-//        expected(`${funclist[i]}.id`, ast.id.type, "Identifier");
-//        console.log(`/-*const ast_${ast.id.name} =*-/ ${JSON.stringify(ast, null, "  ")};\n`);
-//        if (ast.body.type == "BlockStatement")
-//            ast.body.body.forEach(stmt =>
-        seen[funclist[i]] = ast;
-        console.log(`ast_${funclist[i]} = ${JSON.stringify(ast, null, "  ")}`);
-        traverse(funclist[i], ast, "FunctionExpression");
-    }
-    return funclist.map((item, inx) => { return seen[item]}); //return ASTs to caller, not just symbols
-*/
-
-    function traverse(name, ast_node, want_type)
-    {
-        if (want_type && (ast_node.type != want_type)) throw `AST: expected '${name}' to be ${want_type}, not ${ast_node.type}`.red_lt;
-        switch (ast_node.type)
-        {
-            case "FunctionExpression": //{id, params[], defaults[], body{}, generator, expression}
-                if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
-                (ast_node.defaults || []).forEach((item, inx, all) => { traverse(`def[${inx}]`, item); });
-                traverse(ast_node.id.name, ast_node.body);
-                break;
-            case "BlockStatement": //{type, body[]}
-//                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
-                (ast_node.body || []).forEach((item, inx, all) => { traverse(`block[${inx}]`, item); });
-                break;
-            case "VariableDeclaration": //{type, declarations[], kind}
-                (ast_node.declarations || []).forEach((item, inx, all) => { traverse(`decl[${inx}]`, item); });
-                break;
-            case "VariableDeclarator": //{type, id, init{}}
-                traverse(ast_node.id.name, ast_node.init);
-                break;
-            case "ArrayExpression": //{type, elements[]}
-                (ast_node.elements || []).forEach((item, inx, all) => { traverse(`item[${inx}]`, item); });
-                break;
-            case "ExpressionStatement": //{type, expression{}}
-                traverse(name, ast_node.expression);
-                break;
-            case "CallExpression": //{type, callee{}, arguments[]}
-                var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
-                console.log(`found call to ${callee}: ${JSON.stringify(ast_node.callee)}, already seen? ${!!seen[callee]}`);
-                if (!seen[callee]) { funclist.push(callee); seen[callee] = toAST(callee); }
-                (ast_node.arguments || []).forEach((item, inx, all) => { traverse(`arg[${inx}]`, item); });
-                break;
-            case "ArrowFunctionExpression": //{type, id, params[], defaults[], body{}, generator, expression}
-                (ast_node.params || []).forEach((item, inx, all) => { traverse(`param[${inx}]`, item); });
-                (ast_node.defaults || []).forEach((item, inx, all) => { traverse(`def[${inx}]`, item); });
-                traverse(name, ast_node.body);
-                break;
-            case "BinaryExpression": //{type, operator, left{}, right{}}
-                traverse("lhs", ast_node.left);
-                traverse("rhs", ast_node.right);
-                break;
-//ignore leafs:
-            case "Identifier": //{type, name}
-            case "Literal" : //{type, value, raw}
-            case "MemberExpression": //{type, computed, object{}, property{}}
-                break;
-            default: //for debug
-                throw `AST: unhandled node type for ${name}: '${ast_node.type}'`.red_lt;
+            this.suffix();
+            if (opts.echo) console.error(this.chunks.join("\n").cyan_lt);
+            const module = RequireFromString(this.chunks.join("\n"));
+//            this.push(JSON.stringify(compiled, null, "  ") + "\n");
+//            this.push(Object.keys(compiled).join(", ") + "\n");
+            if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
+            if (opts.ast)
+            {
+                if (opts.run) warn("ignoring -run (overridden by -ast)");
+                this.push(/*"const ast = " +*/ JSON.stringify(toAST(module), null, "  ") + "\n");
+            }
+            else if (opts.run) module.RUN_TIME(); //start run-time sim
+            else this.push("TODO: code gen\n");
+//            compiled.execode
         }
-//        return ast;
+        else this.push("no output :(\n");
+        cb();
     }
+
+    function prefix()
+    {
+        console.error("this.prefix".pink_lt);
+        global.abc = function() { console.log("goodbye."); }; //NOTE: this is accessible in child module
+//        this.chunks.push(`console.log("begin");\n`);
+//        if (false)
+        this.chunks.push(`
+            "use strict";
+            const COMPILE_TIME = function(code) { module.exports.COMPILE_TIME = code; }
+            const RUN_TIME = function(code) { module.exports.RUN_TIME = code; }
+            const {step, walkAST} = require("./dsl.js");
+//            global.xyz = function() { console.log("hello!"); }
+            Object.keys(global).forEach((key) => { console.error("global " + key); });
+            console.error("hello!");
+            `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
+        this.prefix = function(){}; //only call this function once
+    }
+    function suffix()
+    {
+        console.error("this.suffix".pink_lt);
+        this.chunks.push(`
+            console.error("end");
+            `.replace(/^\s+/gm, ""));
+    }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+////
+///
+//
+
+
+//single-step thru generator function:
+module.exports.step =
+function step(gen)
+{
+    if (!step.gen || (typeof gen == "function")) step.gen = gen(); //instantiat generator from main entry point
+    const {done, retval} = step.gen.next();
+    while (typeof retval == "function") retval = retval(); //TODO: add flag to control this? (caller might want function instead of value)
+    if (done) return retval;
+    setImmediate(step); //give other events a chance to fire, then step main again
+}
+//for (;;) { if (gen.next().done) break; }
+
+
+//function startup() { main(); }
+function walkAST(entpt, want_raw)
+{
+//    const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
+    if (want_raw === true) want_raw = entpt.toString();
+    entpt = (typeof entpt == "function")? entpt: safe_eval(entpt || "main");
+    if (want_raw) { console.error(want_raw, JSON.stringify(toAST(entpt), null, "  ")); return; }
+//    return console.log(JSON.stringify(toAST(simple_func), null, "  "));
+//    const ast = toAST(main);
+//    traverse(ast);
+//    traverse.funclist = [startup];
+//    for (var i = 0; i < traverse.funclist.length; ++i)
+//    traverse.seen = {entpt || "main": null};
+//    traverse(entpt);
+//    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
+    traverse(toAST(entpt), "entpt");
+/*
+    while (Object.keys(traverse.seen).some((name, inx, all) => //traverse ASTs of dependent objects
+    {
+//        if (traverse.seen[name]) return false;
+//        traverse(traverse.seen[name] = toAST(eval(name)));
+//        return true;
+        return !traverse.seen[name] && (traverse(traverse.seen[name] = toAST(safe_eval(name)), `dependent ${name}`));
+    }));
+    console.error(`${Object.keys(traverse.seen).length} things enumerated: ${Object.keys(traverse.seen).join(", ")}`);
+*/
+}
+
+function traverse(ast_node, name, nest) //, want_type)
+{
+    const THIS = traverse, LEVEL = "  ";
+//    if (!ast_node) ast_node = eval(ast_node); else
+//    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
+//    if (!nest) ast_node = toAST(ast_node);
+//    ast_node = ast_node || toAST(main); //startup);
+    if (!THIS.seen) THIS.seen = {}; //{ ast_node = toAST(ast_node || main); THIS.seen = {}; } //keep list of other ASTs needed
+    if (!THIS.symtab) THIS.symtab = {};
+    if (!ast_node) return;
+    name = name || nameof(ast_node); //(ast_node.id || {}).name || "";
+    nest = nest || "";
+
+//    if (want_type && (ast_node.type != want_type)) throw `AST traverse: expected '${name}' to be ${want_type}, not ${ast_node.type}`.red_lt;
+//    return console.error(JSON.stringify(ast_node, null, "  "));
+    switch (ast_node.type)
+    {
+        case "FunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+        case "FunctionDeclaration": //{type, id{}, params[], defaults[], body{}, generator, expression}
+            console.error(`${nest}'${name}': func ${ast_node.type.replace(/^.*(Expr|Decl).*$/i, "$1")} '${nameof(ast_node.id)}' expr, ${ast_node.params.length} params, ${ast_node.defaults.length} defaults, gen? ${ast_node.generator}, expr? ${ast_node.expression}`);
+            THIS.symtab[nameof(ast_node.id)] = ast_node;
+//            if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
+            (ast_node.params || []).forEach((param, inx, all) => { traverse(param, `param[${inx}/${all.length}]`, nest + LEVEL); });
+            (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+            traverse(ast_node.body, `${nameof(ast_node.id)} body`, nest + LEVEL);
+            break;
+        case "BlockStatement": //{type, body[]}
+            console.error(`${nest}'${name}': block stmt, ${ast_node.body.length} stmts`);
+//                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
+            (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, `blk stmt[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "VariableDeclaration": //{type, declarations[], kind}
+            console.error(`${nest}'${name}': var decl, ${ast_node.declarations.length} dcls, kind ${ast_node.kind}`);
+            (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(Object.assign({kind: ast_node.kind}, dcl), `${ast_node.kind} decl[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "VariableDeclarator": //{type, id, init{}, kind-inherited}
+            console.error(`${nest}'${name}': def name '${nameof(ast_node.id)}', kind ${ast_node.kind}`);
+            THIS.symtab[nameof(ast_node.id)] = ast_node;
+            traverse(ast_node.init, `${nameof(ast_node.id)}.init`, nest + LEVEL);
+            break;
+        case "ArrayExpression": //{type, elements[]}
+            console.error(`${nest}'${name}': arr expr, ${ast_node.elements.length} exprs`);
+            (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "ExpressionStatement": //{type, expression{}}
+            console.error(`${nest}'${name}': expr stmt`);
+            traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+            break;
+        case "CallExpression": //{type, callee{}, arguments[]}
+//            if (!THIS.seen) THIS.seen = {};
+//            if (!THIS.funclist) THIS.funclist = [];
+            console.error(`${nest}'${name}': call expr to ${nameof(ast_node.callee)}: ${arguments.length} args, already seen? ${!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
+            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+            if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+            break;
+        case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+            console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
+            (ast_node.params || []).forEach((param, inx, all) => { console.error(`${nest}param ${param}`); });
+            (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+            traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
+            break;
+        case "BinaryExpression": //{type, operator, left{}, right{}}
+        case "LogicalExpression": //{type, operator, left{}, right{}}
+            console.error(`${nest}'${name}': ${ast_node.type.slice(0, 3)} expr, op ${ast_node.operator}`);
+            traverse(ast_node.left, "lhs", nest + LEVEL);
+            traverse(ast_node.right, "rhs", nest + LEVEL);
+            break;
+        case "UnaryExpression": //{type, operator, argument{}}
+            console.error(`${nest}'${name}': unary expr, op ${ast_node.operator}`);
+            traverse(ast_node.argument, "unop-arg", nest + LEVEL);
+            break;
+        case "UpdateExpression": //{type, operator, argument{}, prefix}
+            console.error(`${nest}'${name}': upd expr, op ${ast_node.operator}, prefix? ${ast_node.prefix}`);
+            traverse(ast_node.argument, "updop-arg", nest + LEVEL);
+            break;
+        case "AssignmentExpression": //{type, operator, left{}, right{}}
+            console.error(`${nest}'${name}': asst expr, op ${ast_node.operator}`);
+            traverse(ast_node.left, "asst-lhs", nest + LEVEL);
+            traverse(ast_node.right, "asst-rhs", nest + LEVEL);
+            break;
+        case "NewExpression": //{type, callee{}, arguments[]}
+            console.error(`${nest}'${name}': new expr to ${nameof(ast_node.callee)}: ${arguments.length} args!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
+            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+            if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+            break;
+        case "ForStatement": //{type, init{}, test{}, update{}, body{}}
+            console.error(`${nest}'${name}': for stmt`)
+            traverse(ast_node.init, "for-init", nest + LEVEL);
+            traverse(ast_node.test, "for-test", nest + LEVEL);
+            traverse(ast_node.update, "for-upd", nest + LEVEL);
+            traverse(ast_node.body, "for-body", nest + LEVEL);
+            break;
+        case "WhileStatement": //{type, test{}, body{}}
+            console.error(`${nest}'${name}': while stmt`)
+            traverse(ast_node.test, "while-test", nest + LEVEL);
+            traverse(ast_node.body, "while-body", nest + LEVEL);
+            break;
+        case "SwitchStatement": //{type, discriminant{}, cases[]}
+            console.error(`${nest}'${name}': switch stmt, ${ast_node.cases.length} cases`);
+            traverse(ast_node.discriminant, "switch val", nest + LEVEL);
+            (ast_node.cases || []).forEach((casestmt, inx, all) => { traverse(casestmt, `case[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "SwitchCase": //{type, test{}, consequent[]}
+            console.error(`${nest}'${name}': switch case, ${ast_node.consequent.length} consequents`)
+            traverse(ast_node.test, "switch test", nest + LEVEL);
+            (ast_node.consequent || []).forEach((conseq, inx, all) => { traverse(conseq, `consequent[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "ThrowStatement": //{type, argument{}}
+            console.error(`${nest}'${name}': throw stmt`)
+            traverse(ast_node.test, "throw stmt", nest + LEVEL);
+            break;
+        case "IfStatement": //{type, test{}, consequent{}, alternate{}}
+            console.error(`${nest}'${name}': if stmt`)
+            traverse(ast_node.test, "if test", nest + LEVEL);
+            traverse(ast_node.consequent, "if-true", nest + LEVEL);
+            traverse(ast_node.alternate, "if-false", nest + LEVEL);
+            break;
+        case "YieldExpression": //{type, argument{}, delegate}
+            console.error(`${nest}'${name}': yield expr, delegate? ${ast_node.delegate}`);
+            traverse(ast_node.argument, "yield expr", nest + LEVEL);
+            break;
+        case "TemplateLiteral": //{type, quasis[], expressions[]}
+            console.error(`${nest}'${name}': template lit, ${ast_node.quasis.length} quasis, ${ast_node.expressions.length} exprs`);
+            (ast_node.quasis || []).forEach((quasi, inx, all) => { traverse(quasi, `quasi[${inx}/${all.length}]`, nest + LEVEL); });
+            (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+            break;
+        case "ReturnStatement": //{type, argument{}}
+            console.error(`${nest}'${name}': return stmt`);
+            traverse(ast_node.argument, "ret stmt", nest + LEVEL);
+            break;
+        case "ExpressionStatement": //{type, expression}
+            console.error(`${nest}'${name}': expr stmt`);
+            traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+            break;
+        case "Identifier": //{type, name}
+            console.error(`${nest}'${name}': ident '${ast_node.name}'`);
+            if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+            break;
+        case "TemplateElement": //{type, value{}, tail}
+            console.error(`${nest}'${name}': templ element, raw '${ast_node.value.raw}', cooked '${ast_node.value.cooked}', tail? ${ast_node.tail}`)
+            break;
+        case "BreakStatement": //{type, label}
+            console.error(`${nest}'${name}': break stmt, label '${ast_node.label}'`);
+            break;
+        case "EmptyStatement": //{type}
+            console.error(`${nest}'${name}': empty stmt`);
+            break;
+        case "Literal" : //{type, value, raw}
+            console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
+            break;
+        case "MemberExpression": //{type, computed, object{}, property{}}
+            console.error(`${nest}'${name}': member expr '${ast_node.object}' '${ast_node.property}'`);
+            if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+            break;
+        default: //for debug
+            throw `AST traverse: unhandled node type for ${name}: type '${ast_node.type}', node ${JSON.stringify(ast_node, null, "  ")}`.red_lt;
+    }
+    return true;
+//        return ast;
+}
+
+function nameof(ast_node)
+{
+//    ast_node = ast_node || {};
+    switch ((ast_node || {}).type)
+    {
+        case "MemberExpression": return `${ast_node.object.name}.${ast_node.property.name}`;
+        case "FunctionExpression": return ast_node.id.name;
+        case "Identifier": return ast_node.name;
+        default: return `unamed ${(ast_node || {type: "(no type)"}).type}`;
+//            throw `AST nameof: unhandled node type: '${JSON.stringify(ast_node)}'`.red_lt; //for debug
+    }
+}
+
 //    function expected(name, what, want, is)
 //    {
 //        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
 //    }
-}
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -605,6 +426,13 @@ function date2str(when)
 }
 
 
+function safe_eval(expr)
+{
+    try { return eval(expr); }
+    catch (exc) { return `ERROR: ${exc} on '${expr}'`; }
+}
+
+
 //remove comment:
 //handles // or /**/
 //TODO: handle quoted strings
@@ -630,15 +458,6 @@ function shebang_args(str, which)
 //    return (this.linenum == 1) && chunk.match(/^\s*#\s*!/);
 //}
 
-/*
-var original = require.extensions['.js']
-require.extensions['.js'] = function(module, filename) {
-  if (filename !== file) return original(module, filename)
-  var content = fs.readFileSync(filename).toString()
-  module._compile(stripBOM(content + replCode), filename)
-}
-*/
-
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
@@ -663,21 +482,22 @@ if (!module.parent) //auto-run CLI
             if (i < 2) return; //skip prog names
             var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
             if (!parts || (parts[1] && parts[3])) { console.error(`invalid option in ${argname}: '${arg}'`.red_lt); return; }
-            if (!parts[1] && !parts[4]) opts.filename = parts[2];
+            if (!parts[1] && !parts[4]) opts.filename = `'${parts[2].replace(/^['"](.*)['"]$/, "&1")}'`; //strip optional quotes and then re-add
             else opts[parts[2].toLowerCase()] = /*(parts[1] == "-")? false: (parts[1] == "+")*/ parts[1]? true: parts[4];
         });
 //    console.log(JSON.stringify(opts, null, "  "));
     if (opts.debug /*!= undefined*/) console.error(debug_out.join("\n").blue_lt);
     if (opts.help /*!= undefined*/) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
-    console.error(`DSL: reading from ${opts.filename || "stdin"} ...`.green_lt);
-    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
+    console.error(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
+    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename.slice(1, -1)): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
     instrm
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
 //        .pipe(preproc(opts))
-        .pipe(ReplStream(opts))
+//        .pipe(ReplStream(opts))
+        .pipe(dsl2js(opts))
 //        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
 //        .pipe((!opts.src && !opts.codegen)? js2ast(opts): new PassThrough())
 //        .pipe(asm_optimize())
@@ -697,7 +517,7 @@ if (!module.parent) //auto-run CLI
             console.error(`error: ${err}`.red_lt);
             process.exit();
         });
-    console.error("DSL: finish asynchronously".green_lt);
+    console.error("DSL engine: finish asynchronously".green_lt);
 }
 //                  ____________________________
 //                 /                            \
