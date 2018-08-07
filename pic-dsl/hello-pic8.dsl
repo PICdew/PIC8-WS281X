@@ -3,40 +3,21 @@
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 //const RUN = false; //debug/sim vs. code gen
-//function* wrapper(){
-
-RUN_TIME(function(){
 //const {step} = require("./dsl.js");
-//module.exports.run =
-//function()
-//{
-//    const {step, walkAST} = require("./dsl.js");
-    var ticker = 
-    setInterval(function() //simulate timer 1
-    {
-        T1IF = 1;
-        if (isNaN(++this.count)) this.count = 1;
-        console.error(`tick#${this.count}`);
-        if (this.count > 5 * 1000/65.536) stop_timer(); //free up event loop for clean exit after 5 sec
-    }, 65.536);
-//    step(main); //run (sim); for logic debug only
-    function stop_timer()
-    {
-        clearInterval(ticker);
-        ticker = null;
-    }
-});
+//module.exports = function*(){
+//COMPILE_TIME(function*(){
 
-
-COMPILE_TIME(function*(){
 //#include "pic16f1827.h"
 var TRISA, PORTA, TMR1, T1IF;
+
 //if (RUN)
-/*
 //const {step} = require("./dsl.js");
-module.exports.run =
-function()
+//RUN_TIME(function(){
+//module.exports.run =
+//module.exports.run =
+function run()
 {
+    console.error("run ...".green_lt);
 //    const {step, walkAST} = require("./dsl.js");
     var ticker = 
     setInterval(function() //simulate timer 1
@@ -53,7 +34,6 @@ function()
         ticker = null;
     }
 }
-*/
 
 
 //module.exports.execode = function*(){
@@ -89,7 +69,7 @@ function* wait_1sec()
 }
 
 
-yield* main(); });
+//yield* main(); });
 
 //}
 //const {step, walkAST} = require("./dsl.js");

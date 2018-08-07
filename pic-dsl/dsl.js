@@ -129,7 +129,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
                 if (opts.run) warn("ignoring -run (overridden by -ast)");
                 this.push(/*"const ast = " +*/ JSON.stringify(toAST(module), null, "  ") + "\n");
             }
-            else if (opts.run) module.RUN_TIME(); //start run-time sim
+            else if (opts.run) module(); //start run-time sim
             else this.push("TODO: code gen\n");
 //            compiled.execode
         }
@@ -145,12 +145,13 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 //        if (false)
         this.chunks.push(`
             "use strict";
-            const COMPILE_TIME = function(code) { module.exports.COMPILE_TIME = code; }
-            const RUN_TIME = function(code) { module.exports.RUN_TIME = code; }
+//            function COMPILE_TIME(code) { module.exports.COMPILE_TIME = code; }
+//            function RUN_TIME(code) { module.exports.RUN_TIME = code; }
             const {step, walkAST} = require("./dsl.js");
 //            global.xyz = function() { console.log("hello!"); }
-            Object.keys(global).forEach((key) => { console.error("global " + key); });
-            console.error("hello!");
+//            Object.keys(global).forEach((key) => { console.error("global " + key); });
+//            console.error("hello!");
+            module.exports = function(){
             `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
         this.prefix = function(){}; //only call this function once
     }
@@ -158,7 +159,10 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
     {
         console.error("this.suffix".pink_lt);
         this.chunks.push(`
-            console.error("end");
+//            if (typeof run == "function") run();
+            ${!opts.run? "//": ""}run();
+            }
+//            console.error("end");
             `.replace(/^\s+/gm, ""));
     }
 }
