@@ -13,7 +13,8 @@ const my_CLI =
 module.exports.CLI =
 function my_CLI(opts)
 {
-    return CLI(Object.assign({}, opts || {}, my_opts));
+    return CLI(Object.assign({}, opts || {}, my_opts))
+        .on("astnode", data => { console.log(`ast node ${JSON.stringify(data)}`.cyan_lt); });
 }
 
 

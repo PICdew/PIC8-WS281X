@@ -23,7 +23,7 @@ const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 
 const dsl2ast =
 module.exports.dsl2ast =
-function dsl2ast(opts) //{filename, replacements, prefix, suffix, debug, shebang}
+function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
 {
 //    if (!opts) opts = {};
     global.opts = opts || {}; //make command line args accessible to child (dsl) module
@@ -133,12 +133,12 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, debug, shebang
 //            if (opts.run) //always run module so load-time logic will execute; -run flag will control nested debug/sim via suffix
 //            {
             console.error("run ...".green_lt);
-            module(); //execute load-time logic, start run-time sim if -run flag is present (see suffix)
+            module(); //execute load-time logic; start run-time sim if -run flag is present (see suffix)
             console.error("... ran".red_lt);
 //            }
             const ast = JSON.stringify(toAST(module), null, "  ");
-            /*if (opts.ast)*/ this.push(/*"const ast = " +*/ ast + "\n"); //send downstream
             if (opts.ast) console.error(ast); //show raw ast
+            /*if (opts.ast)*/ this.push(/*"const ast = " +*/ ast + "\n"); //send downstream
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
         }
@@ -176,11 +176,251 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, debug, shebang
 
 ///////////////////////////////////////////////////////////////////////////////
 ////
-/// Step thru generator function (sim/debug):
+/// Traverse AST, emit nodes:
+//
+
+const walkAST =
+module.exports.walkAST =
+function walkAST(opts) //{}
+{
+    const instrm = new PassThrough(); //wrapper end-point
+//    const instrm = new LineStream({keepEmptyLines: true}); //preserve line#s (for easier debug)
+    const outstrm = instrm
+//        .pipe(preproc())
+        .pipe(thru2(xform, flush)); //syntax fixups
+    outstrm.traverse = traverse;
+    return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+
+    function xform(chunk, enc, cb)
+    {
+        if (!this.chunks) this.chunks = [];
+        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
+        if (chunk.length) this.chunks.push(chunk);
+        cb();
+    }
+    function flush(cb)
+    {
+        if (this.chunks)
+        {
+            const ast = JSON.parse(this.chunks.join("\n"));
+            this.traverse(ast, "entpt");
+//            else this.push("TODO: code gen\n");
+//            compiled.execode
+        }
+        else this.push("no output :(\n");
+        cb();
+    }
+
+    function traverse(ast_node, name, nest) //, want_type)
+    {
+        const THIS = /*traverse*/ this, LEVEL = "  ";
+//    if (!ast_node) ast_node = eval(ast_node); else
+//    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
+//    if (!nest) ast_node = toAST(ast_node);
+//    ast_node = ast_node || toAST(main); //startup);
+        if (!THIS.seen) THIS.seen = {}; //{ ast_node = toAST(ast_node || main); THIS.seen = {}; } //keep list of other ASTs needed
+        if (!THIS.symtab) THIS.symtab = {};
+        if (!ast_node) return;
+        name = name || nameof(ast_node); //(ast_node.id || {}).name || "";
+        nest = nest || "";
+
+//    if (want_type && (ast_node.type != want_type)) throw `AST traverse: expected '${name}' to be ${want_type}, not ${ast_node.type}`.red_lt;
+//    return console.error(JSON.stringify(ast_node, null, "  "));
+//        this.emit(short_type(ast_node.type), ast_node); //pass to downstream event handlers
+//        var evttype = "ast-" + ast_node.type //reduce verbosity
+//            .replace(/Function/i, "func")
+//            .replace(/Expression/i, "expr")
+//            .replace(/Declaration/i, "decl")
+//            .replace(/Statement/i, "stmt")
+//            .replace(/Variable/i, "var")
+//            .replace(/Template/i, "templ")
+//            .replace(/Assignment/i, "asst")
+//            .replace(/Literal/i, "lit")
+//            .replace(/Identifier/i, "ident")
+//            .toLowerCase();
+        this.emit("astnode", Object.assign({}, ast_node, {nest, name})); //NOTE: shallow copy
+        switch (ast_node.type)
+        {
+            case "FunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+            case "FunctionDeclaration": //{type, id{}, params[], defaults[], body{}, generator, expression}
+                console.error(`${nest}'${name}': func ${ast_node.type.replace(/^.*(Expr|Decl).*$/i, "$1")} '${nameof(ast_node.id)}' expr, ${ast_node.params.length} params, ${ast_node.defaults.length} defaults, gen? ${ast_node.generator}, expr? ${ast_node.expression}`);
+//                evttype = ast_node.type.replace(/Function/i, "func")
+                THIS.symtab[nameof(ast_node.id)] = ast_node;
+//            if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
+                (ast_node.params || []).forEach((param, inx, all) => { traverse(param, `param[${inx}/${all.length}]`, nest + LEVEL); });
+                (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+                traverse(ast_node.body, `${nameof(ast_node.id)} body`, nest + LEVEL);
+                break;
+            case "BlockStatement": //{type, body[]}
+                console.error(`${nest}'${name}': block stmt, ${ast_node.body.length} stmts`);
+//                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
+                (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, `blk stmt[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "VariableDeclaration": //{type, declarations[], kind}
+                console.error(`${nest}'${name}': var decl, ${ast_node.declarations.length} dcls, kind ${ast_node.kind}`);
+                (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(Object.assign({kind: ast_node.kind}, dcl), `${ast_node.kind} decl[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "VariableDeclarator": //{type, id, init{}, kind-inherited}
+                console.error(`${nest}'${name}': def name '${nameof(ast_node.id)}', kind ${ast_node.kind}`);
+                THIS.symtab[nameof(ast_node.id)] = ast_node;
+                traverse(ast_node.init, `${nameof(ast_node.id)}.init`, nest + LEVEL);
+                break;
+            case "ArrayExpression": //{type, elements[]}
+                console.error(`${nest}'${name}': arr expr, ${ast_node.elements.length} exprs`);
+                (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "ExpressionStatement": //{type, expression{}}
+                console.error(`${nest}'${name}': expr stmt`);
+                traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+                break;
+            case "CallExpression": //{type, callee{}, arguments[]}
+//            if (!THIS.seen) THIS.seen = {};
+//            if (!THIS.funclist) THIS.funclist = [];
+                console.error(`${nest}'${name}': call expr to ${nameof(ast_node.callee)}: ${arguments.length} args, already seen? ${!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
+                (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+                break;
+            case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+                console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
+                (ast_node.params || []).forEach((param, inx, all) => { console.error(`${nest}param ${param}`); });
+                (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+                traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
+                break;
+            case "BinaryExpression": //{type, operator, left{}, right{}}
+            case "LogicalExpression": //{type, operator, left{}, right{}}
+                console.error(`${nest}'${name}': ${ast_node.type.slice(0, 3)} expr, op ${ast_node.operator}`);
+                traverse(ast_node.left, "lhs", nest + LEVEL);
+                traverse(ast_node.right, "rhs", nest + LEVEL);
+                break;
+            case "UnaryExpression": //{type, operator, argument{}}
+                console.error(`${nest}'${name}': unary expr, op ${ast_node.operator}`);
+                traverse(ast_node.argument, "unop-arg", nest + LEVEL);
+                break;
+            case "UpdateExpression": //{type, operator, argument{}, prefix}
+                console.error(`${nest}'${name}': upd expr, op ${ast_node.operator}, prefix? ${ast_node.prefix}`);
+                traverse(ast_node.argument, "updop-arg", nest + LEVEL);
+                break;
+            case "AssignmentExpression": //{type, operator, left{}, right{}}
+                console.error(`${nest}'${name}': asst expr, op ${ast_node.operator}`);
+                traverse(ast_node.left, "asst-lhs", nest + LEVEL);
+                traverse(ast_node.right, "asst-rhs", nest + LEVEL);
+                break;
+            case "NewExpression": //{type, callee{}, arguments[]}
+                console.error(`${nest}'${name}': new expr to ${nameof(ast_node.callee)}: ${arguments.length} args!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
+                (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+                break;
+            case "ForStatement": //{type, init{}, test{}, update{}, body{}}
+                console.error(`${nest}'${name}': for stmt`)
+                traverse(ast_node.init, "for-init", nest + LEVEL);
+                traverse(ast_node.test, "for-test", nest + LEVEL);
+                traverse(ast_node.update, "for-upd", nest + LEVEL);
+                traverse(ast_node.body, "for-body", nest + LEVEL);
+                break;
+            case "WhileStatement": //{type, test{}, body{}}
+                console.error(`${nest}'${name}': while stmt`)
+                traverse(ast_node.test, "while-test", nest + LEVEL);
+                traverse(ast_node.body, "while-body", nest + LEVEL);
+                break;
+            case "SwitchStatement": //{type, discriminant{}, cases[]}
+                console.error(`${nest}'${name}': switch stmt, ${ast_node.cases.length} cases`);
+                traverse(ast_node.discriminant, "switch val", nest + LEVEL);
+                (ast_node.cases || []).forEach((casestmt, inx, all) => { traverse(casestmt, `case[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "SwitchCase": //{type, test{}, consequent[]}
+                console.error(`${nest}'${name}': switch case, ${ast_node.consequent.length} consequents`)
+                traverse(ast_node.test, "switch test", nest + LEVEL);
+                (ast_node.consequent || []).forEach((conseq, inx, all) => { traverse(conseq, `consequent[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "ThrowStatement": //{type, argument{}}
+                console.error(`${nest}'${name}': throw stmt`)
+                traverse(ast_node.test, "throw stmt", nest + LEVEL);
+                break;
+            case "IfStatement": //{type, test{}, consequent{}, alternate{}}
+                console.error(`${nest}'${name}': if stmt`)
+                traverse(ast_node.test, "if test", nest + LEVEL);
+                traverse(ast_node.consequent, "if-true", nest + LEVEL);
+                traverse(ast_node.alternate, "if-false", nest + LEVEL);
+                break;
+            case "YieldExpression": //{type, argument{}, delegate}
+                console.error(`${nest}'${name}': yield expr, delegate? ${ast_node.delegate}`);
+                traverse(ast_node.argument, "yield expr", nest + LEVEL);
+                break;
+            case "TemplateLiteral": //{type, quasis[], expressions[]}
+                console.error(`${nest}'${name}': template lit, ${ast_node.quasis.length} quasis, ${ast_node.expressions.length} exprs`);
+                (ast_node.quasis || []).forEach((quasi, inx, all) => { traverse(quasi, `quasi[${inx}/${all.length}]`, nest + LEVEL); });
+                (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+                break;
+            case "ReturnStatement": //{type, argument{}}
+                console.error(`${nest}'${name}': return stmt`);
+                traverse(ast_node.argument, "ret stmt", nest + LEVEL);
+                break;
+            case "ExpressionStatement": //{type, expression}
+                console.error(`${nest}'${name}': expr stmt`);
+                traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+                break;
+            case "Identifier": //{type, name}
+                console.error(`${nest}'${name}': ident '${ast_node.name}'`);
+                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+                break;
+            case "TemplateElement": //{type, value{}, tail}
+                console.error(`${nest}'${name}': templ element, raw '${ast_node.value.raw}', cooked '${ast_node.value.cooked}', tail? ${ast_node.tail}`)
+                break;
+            case "BreakStatement": //{type, label}
+                console.error(`${nest}'${name}': break stmt, label '${ast_node.label}'`);
+                break;
+            case "EmptyStatement": //{type}
+                console.error(`${nest}'${name}': empty stmt`);
+                break;
+            case "Literal" : //{type, value, raw}
+                console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
+                break;
+            case "MemberExpression": //{type, computed, object{}, property{}}
+                console.error(`${nest}'${name}': member expr '${ast_node.object}' '${ast_node.property}'`);
+                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+                break;
+            default: //for debug
+                throw `AST traverse: unhandled node type for ${name}: type '${ast_node.type}', node ${JSON.stringify(ast_node, null, "  ")}`.red_lt;
+        }
+        return true;
+//        return ast;
+    }
+
+//cut down on verbosity:
+//    function short_type(str)
+//    {
+//        return str.replace(/Expression/i, "expr").replace(/Statement/i, "stmt").replace()
+//    }
+
+    function nameof(ast_node)
+    {
+//    ast_node = ast_node || {};
+        switch ((ast_node || {}).type)
+        {
+            case "MemberExpression": return `${ast_node.object.name}.${ast_node.property.name}`;
+            case "FunctionExpression": return ast_node.id.name;
+            case "Identifier": return ast_node.name;
+            default: return `unamed ${(ast_node || {type: "(no type)"}).type}`;
+//            throw `AST nameof: unhandled node type: '${JSON.stringify(ast_node)}'`.red_lt; //for debug
+        }
+    }
+
+//    function expected(name, what, want, is)
+//    {
+//        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
+//    }
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+////
+/// Helper functions/misc exports:
 //
 
 
-//single-step thru generator function:
+//single-step thru generator function (for sim/debug):
 module.exports.step =
 function step(gen)
 {
@@ -192,228 +432,6 @@ function step(gen)
 }
 //for (;;) { if (gen.next().done) break; }
 
-
-///////////////////////////////////////////////////////////////////////////////
-////
-/// Step thru generator function (sim/debug):
-//
-
-/*
-//function startup() { main(); }
-function walkAST(entpt, want_raw)
-{
-//    const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
-    if (want_raw === true) want_raw = entpt.toString();
-    entpt = (typeof entpt == "function")? entpt: safe_eval(entpt || "main");
-    if (want_raw) { console.error(want_raw, JSON.stringify(toAST(entpt), null, "  ")); return; }
-//    return console.log(JSON.stringify(toAST(simple_func), null, "  "));
-//    const ast = toAST(main);
-//    traverse(ast);
-//    traverse.funclist = [startup];
-//    for (var i = 0; i < traverse.funclist.length; ++i)
-//    traverse.seen = {entpt || "main": null};
-//    traverse(entpt);
-//    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
-    traverse(toAST(entpt), "entpt");
-/-*
-    while (Object.keys(traverse.seen).some((name, inx, all) => //traverse ASTs of dependent objects
-    {
-//        if (traverse.seen[name]) return false;
-//        traverse(traverse.seen[name] = toAST(eval(name)));
-//        return true;
-        return !traverse.seen[name] && (traverse(traverse.seen[name] = toAST(safe_eval(name)), `dependent ${name}`));
-    }));
-    console.error(`${Object.keys(traverse.seen).length} things enumerated: ${Object.keys(traverse.seen).join(", ")}`);
-*-/
-}
-
-function traverse(ast_node, name, nest) //, want_type)
-{
-    const THIS = traverse, LEVEL = "  ";
-//    if (!ast_node) ast_node = eval(ast_node); else
-//    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
-//    if (!nest) ast_node = toAST(ast_node);
-//    ast_node = ast_node || toAST(main); //startup);
-    if (!THIS.seen) THIS.seen = {}; //{ ast_node = toAST(ast_node || main); THIS.seen = {}; } //keep list of other ASTs needed
-    if (!THIS.symtab) THIS.symtab = {};
-    if (!ast_node) return;
-    name = name || nameof(ast_node); //(ast_node.id || {}).name || "";
-    nest = nest || "";
-
-//    if (want_type && (ast_node.type != want_type)) throw `AST traverse: expected '${name}' to be ${want_type}, not ${ast_node.type}`.red_lt;
-//    return console.error(JSON.stringify(ast_node, null, "  "));
-    switch (ast_node.type)
-    {
-        case "FunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
-        case "FunctionDeclaration": //{type, id{}, params[], defaults[], body{}, generator, expression}
-            console.error(`${nest}'${name}': func ${ast_node.type.replace(/^.*(Expr|Decl).*$/i, "$1")} '${nameof(ast_node.id)}' expr, ${ast_node.params.length} params, ${ast_node.defaults.length} defaults, gen? ${ast_node.generator}, expr? ${ast_node.expression}`);
-            THIS.symtab[nameof(ast_node.id)] = ast_node;
-//            if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
-            (ast_node.params || []).forEach((param, inx, all) => { traverse(param, `param[${inx}/${all.length}]`, nest + LEVEL); });
-            (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
-            traverse(ast_node.body, `${nameof(ast_node.id)} body`, nest + LEVEL);
-            break;
-        case "BlockStatement": //{type, body[]}
-            console.error(`${nest}'${name}': block stmt, ${ast_node.body.length} stmts`);
-//                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
-            (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, `blk stmt[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "VariableDeclaration": //{type, declarations[], kind}
-            console.error(`${nest}'${name}': var decl, ${ast_node.declarations.length} dcls, kind ${ast_node.kind}`);
-            (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(Object.assign({kind: ast_node.kind}, dcl), `${ast_node.kind} decl[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "VariableDeclarator": //{type, id, init{}, kind-inherited}
-            console.error(`${nest}'${name}': def name '${nameof(ast_node.id)}', kind ${ast_node.kind}`);
-            THIS.symtab[nameof(ast_node.id)] = ast_node;
-            traverse(ast_node.init, `${nameof(ast_node.id)}.init`, nest + LEVEL);
-            break;
-        case "ArrayExpression": //{type, elements[]}
-            console.error(`${nest}'${name}': arr expr, ${ast_node.elements.length} exprs`);
-            (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "ExpressionStatement": //{type, expression{}}
-            console.error(`${nest}'${name}': expr stmt`);
-            traverse(ast_node.expression, "expr stmt", nest + LEVEL);
-            break;
-        case "CallExpression": //{type, callee{}, arguments[]}
-//            if (!THIS.seen) THIS.seen = {};
-//            if (!THIS.funclist) THIS.funclist = [];
-            console.error(`${nest}'${name}': call expr to ${nameof(ast_node.callee)}: ${arguments.length} args, already seen? ${!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
-//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
-            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
-            if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
-            break;
-        case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
-            console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
-            (ast_node.params || []).forEach((param, inx, all) => { console.error(`${nest}param ${param}`); });
-            (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
-            traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
-            break;
-        case "BinaryExpression": //{type, operator, left{}, right{}}
-        case "LogicalExpression": //{type, operator, left{}, right{}}
-            console.error(`${nest}'${name}': ${ast_node.type.slice(0, 3)} expr, op ${ast_node.operator}`);
-            traverse(ast_node.left, "lhs", nest + LEVEL);
-            traverse(ast_node.right, "rhs", nest + LEVEL);
-            break;
-        case "UnaryExpression": //{type, operator, argument{}}
-            console.error(`${nest}'${name}': unary expr, op ${ast_node.operator}`);
-            traverse(ast_node.argument, "unop-arg", nest + LEVEL);
-            break;
-        case "UpdateExpression": //{type, operator, argument{}, prefix}
-            console.error(`${nest}'${name}': upd expr, op ${ast_node.operator}, prefix? ${ast_node.prefix}`);
-            traverse(ast_node.argument, "updop-arg", nest + LEVEL);
-            break;
-        case "AssignmentExpression": //{type, operator, left{}, right{}}
-            console.error(`${nest}'${name}': asst expr, op ${ast_node.operator}`);
-            traverse(ast_node.left, "asst-lhs", nest + LEVEL);
-            traverse(ast_node.right, "asst-rhs", nest + LEVEL);
-            break;
-        case "NewExpression": //{type, callee{}, arguments[]}
-            console.error(`${nest}'${name}': new expr to ${nameof(ast_node.callee)}: ${arguments.length} args!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
-//            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
-            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
-            if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
-            break;
-        case "ForStatement": //{type, init{}, test{}, update{}, body{}}
-            console.error(`${nest}'${name}': for stmt`)
-            traverse(ast_node.init, "for-init", nest + LEVEL);
-            traverse(ast_node.test, "for-test", nest + LEVEL);
-            traverse(ast_node.update, "for-upd", nest + LEVEL);
-            traverse(ast_node.body, "for-body", nest + LEVEL);
-            break;
-        case "WhileStatement": //{type, test{}, body{}}
-            console.error(`${nest}'${name}': while stmt`)
-            traverse(ast_node.test, "while-test", nest + LEVEL);
-            traverse(ast_node.body, "while-body", nest + LEVEL);
-            break;
-        case "SwitchStatement": //{type, discriminant{}, cases[]}
-            console.error(`${nest}'${name}': switch stmt, ${ast_node.cases.length} cases`);
-            traverse(ast_node.discriminant, "switch val", nest + LEVEL);
-            (ast_node.cases || []).forEach((casestmt, inx, all) => { traverse(casestmt, `case[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "SwitchCase": //{type, test{}, consequent[]}
-            console.error(`${nest}'${name}': switch case, ${ast_node.consequent.length} consequents`)
-            traverse(ast_node.test, "switch test", nest + LEVEL);
-            (ast_node.consequent || []).forEach((conseq, inx, all) => { traverse(conseq, `consequent[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "ThrowStatement": //{type, argument{}}
-            console.error(`${nest}'${name}': throw stmt`)
-            traverse(ast_node.test, "throw stmt", nest + LEVEL);
-            break;
-        case "IfStatement": //{type, test{}, consequent{}, alternate{}}
-            console.error(`${nest}'${name}': if stmt`)
-            traverse(ast_node.test, "if test", nest + LEVEL);
-            traverse(ast_node.consequent, "if-true", nest + LEVEL);
-            traverse(ast_node.alternate, "if-false", nest + LEVEL);
-            break;
-        case "YieldExpression": //{type, argument{}, delegate}
-            console.error(`${nest}'${name}': yield expr, delegate? ${ast_node.delegate}`);
-            traverse(ast_node.argument, "yield expr", nest + LEVEL);
-            break;
-        case "TemplateLiteral": //{type, quasis[], expressions[]}
-            console.error(`${nest}'${name}': template lit, ${ast_node.quasis.length} quasis, ${ast_node.expressions.length} exprs`);
-            (ast_node.quasis || []).forEach((quasi, inx, all) => { traverse(quasi, `quasi[${inx}/${all.length}]`, nest + LEVEL); });
-            (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
-            break;
-        case "ReturnStatement": //{type, argument{}}
-            console.error(`${nest}'${name}': return stmt`);
-            traverse(ast_node.argument, "ret stmt", nest + LEVEL);
-            break;
-        case "ExpressionStatement": //{type, expression}
-            console.error(`${nest}'${name}': expr stmt`);
-            traverse(ast_node.expression, "expr stmt", nest + LEVEL);
-            break;
-        case "Identifier": //{type, name}
-            console.error(`${nest}'${name}': ident '${ast_node.name}'`);
-            if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
-            break;
-        case "TemplateElement": //{type, value{}, tail}
-            console.error(`${nest}'${name}': templ element, raw '${ast_node.value.raw}', cooked '${ast_node.value.cooked}', tail? ${ast_node.tail}`)
-            break;
-        case "BreakStatement": //{type, label}
-            console.error(`${nest}'${name}': break stmt, label '${ast_node.label}'`);
-            break;
-        case "EmptyStatement": //{type}
-            console.error(`${nest}'${name}': empty stmt`);
-            break;
-        case "Literal" : //{type, value, raw}
-            console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
-            break;
-        case "MemberExpression": //{type, computed, object{}, property{}}
-            console.error(`${nest}'${name}': member expr '${ast_node.object}' '${ast_node.property}'`);
-            if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
-            break;
-        default: //for debug
-            throw `AST traverse: unhandled node type for ${name}: type '${ast_node.type}', node ${JSON.stringify(ast_node, null, "  ")}`.red_lt;
-    }
-    return true;
-//        return ast;
-}
-
-function nameof(ast_node)
-{
-//    ast_node = ast_node || {};
-    switch ((ast_node || {}).type)
-    {
-        case "MemberExpression": return `${ast_node.object.name}.${ast_node.property.name}`;
-        case "FunctionExpression": return ast_node.id.name;
-        case "Identifier": return ast_node.name;
-        default: return `unamed ${(ast_node || {type: "(no type)"}).type}`;
-//            throw `AST nameof: unhandled node type: '${JSON.stringify(ast_node)}'`.red_lt; //for debug
-    }
-}
-
-//    function expected(name, what, want, is)
-//    {
-//        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
-//    }
-*/
-
-
-/////////////////////////////////////////////////////////////////////////////////
-////
-/// Helper functions:
-//
 
 const error =
 module.exports.error =
