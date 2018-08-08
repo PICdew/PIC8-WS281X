@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-//DSL parser for Javascript
+//DSL-to-Javascript AST streamer
 
 "use strict";
 require("magic-globals"); //__file, __line, __func, etc
@@ -16,16 +16,17 @@ const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node
 const {/*Readable, Writable,*/ PassThrough} = require("stream");
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 const RequireFromString = require('require-from-string');
-//const CaptureConsole = require("capture-console");
+const CaptureConsole = require("capture-console");
 const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 //const REPL = require("repl"); //https://nodejs.org/api/repl.html
 
 
-const dsl2js =
-module.exports.dsl2js =
-function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
+const dsl2ast =
+module.exports.dsl2ast =
+function dsl2ast(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 {
-    if (!opts) opts = {};
+//    if (!opts) opts = {};
+    global.opts = opts || {}; //make command line args accessible to child (dsl) module
 //TODO: define custom ops
 //    const instrm = new Readable();
 //    const outstrm = //new Writable();
@@ -119,18 +120,26 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
         if (this.chunks)
         {
             this.suffix();
-            if (opts.echo) console.error(this.chunks.join("\n").cyan_lt);
             const module = RequireFromString(this.chunks.join("\n"));
+            if (opts.echo) console.error(this.chunks.join("\n").cyan_lt); //show source code input
+            if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
 //            this.push(JSON.stringify(compiled, null, "  ") + "\n");
 //            this.push(Object.keys(compiled).join(", ") + "\n");
-            if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
-            if (opts.ast)
-            {
-                if (opts.run) warn("ignoring -run (overridden by -ast)");
-                this.push(/*"const ast = " +*/ JSON.stringify(toAST(module), null, "  ") + "\n");
-            }
-            else if (opts.run) module(); //start run-time sim
-            else this.push("TODO: code gen\n");
+//            if (opts.ast)
+//            {
+//                if (opts.run) warn("ignoring -run (overridden by -ast)");
+//                this.push(/*"const ast = " +*/ JSON.stringify(toAST(module), null, "  ") + "\n");
+//            } else
+//            if (opts.run) //always run module so load-time logic will execute; -run flag will control nested debug/sim via suffix
+//            {
+            console.error("run ...".green_lt);
+            module(); //execute load-time logic, start run-time sim if -run flag is present (see suffix)
+            console.error("... ran".red_lt);
+//            }
+            const ast = JSON.stringify(toAST(module), null, "  ");
+            /*if (opts.ast)*/ this.push(/*"const ast = " +*/ ast + "\n"); //send downstream
+            if (opts.ast) console.error(ast); //show raw ast
+//            else this.push("TODO: code gen\n");
 //            compiled.execode
         }
         else this.push("no output :(\n");
@@ -139,30 +148,27 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 
     function prefix()
     {
-        console.error("this.prefix".pink_lt);
-        global.abc = function() { console.log("goodbye."); }; //NOTE: this is accessible in child module
+        console.error("dsl prefix: start stdout capture".pink_lt);
+        CaptureConsole.startCapture(process.stdout, (output) => { this.chunks.push("//stdout: " + output); }); //send all stdout downstream thru pipeline
+//        global.abc = function() { console.log("goodbye."); }; //NOTE: this is accessible in child module
+//        global.opts = opts; //make command line args accessible in child module
 //        this.chunks.push(`console.log("begin");\n`);
 //        if (false)
         this.chunks.push(`
             "use strict";
-//            function COMPILE_TIME(code) { module.exports.COMPILE_TIME = code; }
-//            function RUN_TIME(code) { module.exports.RUN_TIME = code; }
-            const {step, walkAST} = require("./dsl.js");
-//            global.xyz = function() { console.log("hello!"); }
-//            Object.keys(global).forEach((key) => { console.error("global " + key); });
-//            console.error("hello!");
-            module.exports = function(){
+            const {step/*, walkAST*/} = require("./dsl.js");
+            module.exports = function(){ //wrap all logic so it's included within AST
             `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
         this.prefix = function(){}; //only call this function once
     }
     function suffix()
     {
-        console.error("this.suffix".pink_lt);
+        CaptureConsole.stopCapture(process.stdout);
+        console.error("dsl suffix: end stdout capture".pink_lt);
         this.chunks.push(`
 //            if (typeof run == "function") run();
             ${!opts.run? "//": ""}run();
-            }
-//            console.error("end");
+            } //end of wrapper
             `.replace(/^\s+/gm, ""));
     }
 }
@@ -170,7 +176,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, debug, shebang}
 
 ///////////////////////////////////////////////////////////////////////////////
 ////
-///
+/// Step thru generator function (sim/debug):
 //
 
 
@@ -187,6 +193,12 @@ function step(gen)
 //for (;;) { if (gen.next().done) break; }
 
 
+///////////////////////////////////////////////////////////////////////////////
+////
+/// Step thru generator function (sim/debug):
+//
+
+/*
 //function startup() { main(); }
 function walkAST(entpt, want_raw)
 {
@@ -203,7 +215,7 @@ function walkAST(entpt, want_raw)
 //    traverse(entpt);
 //    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
     traverse(toAST(entpt), "entpt");
-/*
+/-*
     while (Object.keys(traverse.seen).some((name, inx, all) => //traverse ASTs of dependent objects
     {
 //        if (traverse.seen[name]) return false;
@@ -212,7 +224,7 @@ function walkAST(entpt, want_raw)
         return !traverse.seen[name] && (traverse(traverse.seen[name] = toAST(safe_eval(name)), `dependent ${name}`));
     }));
     console.error(`${Object.keys(traverse.seen).length} things enumerated: ${Object.keys(traverse.seen).join(", ")}`);
-*/
+*-/
 }
 
 function traverse(ast_node, name, nest) //, want_type)
@@ -395,6 +407,7 @@ function nameof(ast_node)
 //    {
 //        if (what != want) throw `AST: expected '${name}' to be a ${want}, not ${is}`.red_lt;
 //    }
+*/
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -465,16 +478,19 @@ function shebang_args(str, which)
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
-/// Unit test/command-line interface:
+/// Unit test/Command-line interface:
 //
 
-if (!module.parent) //auto-run CLI
+const pathlib = require("path");
+const fs = require("fs");
+
+const CLI =
+module.exports.CLI =
+function CLI(more_opts)
 {
 //    const RequireFromString = require('require-from-string');
 //    const Collect = require("collect-strean");
 //    const {LineStream} = require('byline');
-    const pathlib = require("path");
-    const fs = require("fs");
     const CWD = "";
 //    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
     const opts = {}, debug_out = [];
@@ -494,14 +510,15 @@ if (!module.parent) //auto-run CLI
     if (opts.help /*!= undefined*/) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
     console.error(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
     const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename.slice(1, -1)): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
-    instrm
+    const retstrm =
+        instrm
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
 //        .pipe(preproc(opts))
 //        .pipe(ReplStream(opts))
-        .pipe(dsl2js(opts))
+        .pipe(dsl2ast(Object.assign(opts, more_opts || {})))
 //        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
 //        .pipe((!opts.src && !opts.codegen)? js2ast(opts): new PassThrough())
 //        .pipe(asm_optimize())
@@ -522,9 +539,12 @@ if (!module.parent) //auto-run CLI
             process.exit();
         });
     console.error("DSL engine: finish asynchronously".green_lt);
+    return retstrm;
 }
 //                  ____________________________
 //                 /                            \
 //file or stdin ---\--> macro expand -> REPL ---/----> AST
+
+if (!module.parent) CLI(); //auto-run CLI
 
 //eof

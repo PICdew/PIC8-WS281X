@@ -1,24 +1,16 @@
-#!./dsl.js -run -echo -Xast -debug
+#!./pic8-dsl.js -Xrun -Xast -echo -debug
 //"use strict";
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-//const RUN = false; //debug/sim vs. code gen
-//const {step} = require("./dsl.js");
-//module.exports = function*(){
-//COMPILE_TIME(function*(){
+console.log("opts: " + JSON.stringify(opts));
 
 //#include "pic16f1827.h"
 var TRISA, PORTA, TMR1, T1IF;
 
-//if (RUN)
-//const {step} = require("./dsl.js");
-//RUN_TIME(function(){
-//module.exports.run =
-//module.exports.run =
+//this function called by -run command-line arg:
 function run()
 {
-    console.error("run ...".green_lt);
-//    const {step, walkAST} = require("./dsl.js");
+//    console.error("dsl run ...".green_lt);
     var ticker = 
     setInterval(function() //simulate timer 1
     {
@@ -36,14 +28,15 @@ function run()
 }
 
 
-//module.exports.execode = function*(){
-
 function simple_func(x) { return x + 4; }
-//function wrapper() { main(); }
 
 
+//main entry point:
+//(generator function only for debug/sim)
 function* main()
 {
+    console.log("//this is added to src output");
+    console.error("//this is not");
     TRISA = 0x3;
     PORTA = 0;
     for (;;)
@@ -53,6 +46,7 @@ function* main()
         yield* wait_1sec();
     }
 }
+
 
 function* wait_1sec()
 {
@@ -67,20 +61,5 @@ function* wait_1sec()
         while (!T1IF) yield step; //process.nextTick();
     }
 }
-
-
-//yield* main(); });
-
-//}
-//const {step, walkAST} = require("./dsl.js");
-//yield* main();
-//}
-//const gen = main();
-//walkAST("wait_1sec", "wait_1sec");
-//if (RUN)
-//    step(wrapper); //run (sim); for logic debug only
-//else
-//    walkAST("wrapper"); //, true); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []});
-//    walkAST("wrapper"); //"simple_func"); //"main");
 
 //eof
