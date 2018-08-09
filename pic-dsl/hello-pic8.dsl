@@ -1,8 +1,8 @@
-#!./pic8-dsl.js -Xrun -Xast -echo -debug
+#!./pic8-dsl.js -Xrun -ast -Xecho -Xreduce -Xcodegen -debug
 //"use strict";
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-console.log("opts: " + JSON.stringify(opts));
+console.log("opts: " + JSON5.stringify(opts));
 
 //#include "pic16f1827.h"
 var TRISA, PORTA, TMR1, T1IF;

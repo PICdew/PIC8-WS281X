@@ -4,6 +4,7 @@
 "use strict";
 require("magic-globals"); //__file, __line, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
+const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -26,6 +27,7 @@ module.exports.dsl2ast =
 function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
 {
 //    if (!opts) opts = {};
+    global.JSON5 = JSON5; //make accessible to child modules
     global.opts = opts || {}; //make command line args accessible to child (dsl) module
 //TODO: define custom ops
 //    const instrm = new Readable();
@@ -41,12 +43,12 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //    return instrm;
     const instrm = new PassThrough(); //wrapper end-point
 //    const instrm = new LineStream({keepEmptyLines: true}); //preserve line#s (for easier debug)
-    if (opts.debug)
-    {
-        console.error(`${process.argv.length} dsl args:`.blue_lt);
-        for (var a in process.argv)
-            console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
-    }
+//    if (opts.debug)
+//    {
+//        console.error(`${process.argv.length} dsl args:`.blue_lt);
+//        for (var a in process.argv)
+//            console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
+//    }
     const outstrm = instrm
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
@@ -132,12 +134,12 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //            } else
 //            if (opts.run) //always run module so load-time logic will execute; -run flag will control nested debug/sim via suffix
 //            {
-            console.error("run ...".green_lt);
+//            console.error("run ...".green_lt);
             module(); //execute load-time logic; start run-time sim if -run flag is present (see suffix)
-            console.error("... ran".red_lt);
+//            console.error("... ran".red_lt);
 //            }
-            const ast = JSON.stringify(toAST(module), null, "  ");
-            if (opts.ast) console.error(ast); //show raw ast
+            const ast = JSON5.stringify(toAST(module), null, "  ");
+            if (opts.ast) console.error(ast); //show raw AST
             /*if (opts.ast)*/ this.push(/*"const ast = " +*/ ast + "\n"); //send downstream
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
@@ -188,8 +190,10 @@ function walkAST(opts) //{}
     const outstrm = instrm
 //        .pipe(preproc())
         .pipe(thru2(xform, flush)); //syntax fixups
+    outstrm.reduce = reduce;
     outstrm.traverse = traverse;
-    return new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+    const retstrm = new DuplexStream(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+    return retstrm;
 
     function xform(chunk, enc, cb)
     {
@@ -202,13 +206,22 @@ function walkAST(opts) //{}
     {
         if (this.chunks)
         {
-            const ast = JSON.parse(this.chunks.join("\n"));
-            this.traverse(ast, "entpt");
+            const ast_raw = JSON5.parse(this.chunks.join("\n")); //rebuild AST in memory
+            const ast = !opts.reduce? reduce(ast_raw): ast_raw;
+            if (opts.ast && !opts.reduce) console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST also
+            this.traverse(ast, "entpt"); //emit events for AST nodes
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
+            this.push("walked ast\n");
         }
         else this.push("no output :(\n");
         cb();
+    }
+
+//coalesce compile-time constants:
+    function reduce(ast_node)
+    {
+        return ast_node;
     }
 
     function traverse(ast_node, name, nest) //, want_type)
@@ -218,8 +231,8 @@ function walkAST(opts) //{}
 //    if ((typeof ast_node != "object") || !ast_node.type) ast_node = toAST(eval(ast_node || "main")); //ast_node = toAST(eval(ast_node || "main")); //{type: "CallExpression", callee: {type: "Identifier", name: "main"}, arguments: []}); //top level node
 //    if (!nest) ast_node = toAST(ast_node);
 //    ast_node = ast_node || toAST(main); //startup);
-        if (!THIS.seen) THIS.seen = {}; //{ ast_node = toAST(ast_node || main); THIS.seen = {}; } //keep list of other ASTs needed
-        if (!THIS.symtab) THIS.symtab = {};
+//        if (!THIS.seen) THIS.seen = {}; //{ ast_node = toAST(ast_node || main); THIS.seen = {}; } //keep list of other ASTs needed
+//        if (!THIS.symtab) THIS.symtab = {};
         if (!ast_node) return;
         name = name || nameof(ast_node); //(ast_node.id || {}).name || "";
         nest = nest || "";
@@ -238,153 +251,180 @@ function walkAST(opts) //{}
 //            .replace(/Literal/i, "lit")
 //            .replace(/Identifier/i, "ident")
 //            .toLowerCase();
-        this.emit("astnode", Object.assign({}, ast_node, {nest, name})); //NOTE: shallow copy
+        const evt = Object.assign({}, ast_node, {nest: nest.length / LEVEL.length, name}); //CAUTION: node subtree can be large
         switch (ast_node.type)
         {
             case "FunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
             case "FunctionDeclaration": //{type, id{}, params[], defaults[], body{}, generator, expression}
-                console.error(`${nest}'${name}': func ${ast_node.type.replace(/^.*(Expr|Decl).*$/i, "$1")} '${nameof(ast_node.id)}' expr, ${ast_node.params.length} params, ${ast_node.defaults.length} defaults, gen? ${ast_node.generator}, expr? ${ast_node.expression}`);
+//                console.error(`${nest}'${name}': func ${ast_node.type.replace(/^.*(Expr|Decl).*$/i, "$1")} '${nameof(ast_node.id)}' expr, ${ast_node.params.length} params, ${ast_node.defaults.length} defaults, gen? ${ast_node.generator}, expr? ${ast_node.expression}`);
 //                evttype = ast_node.type.replace(/Function/i, "func")
-                THIS.symtab[nameof(ast_node.id)] = ast_node;
+//                THIS.symtab[nameof(ast_node.id)] = ast_node;
 //            if (!want_type) funclist.push(ast_node.id.name);; //add to active function list
-                (ast_node.params || []).forEach((param, inx, all) => { traverse(param, `param[${inx}/${all.length}]`, nest + LEVEL); });
-                (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
-                traverse(ast_node.body, `${nameof(ast_node.id)} body`, nest + LEVEL);
+                evt.children = ["params[]", "defaults[]", "body"];
+                (ast_node.params || []).forEach((param, inx, all) => { this.traverse(param, `param[${inx}/${all.length}]`, nest + LEVEL); });
+                (ast_node.defaults || []).forEach((def, inx, all) => { this.traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+                this.traverse(ast_node.body, `${nameof(ast_node.id)} body`, nest + LEVEL);
                 break;
             case "BlockStatement": //{type, body[]}
-                console.error(`${nest}'${name}': block stmt, ${ast_node.body.length} stmts`);
+//                console.error(`${nest}'${name}': block stmt, ${ast_node.body.length} stmts`);
 //                if (!ast_node.body) throw `AST: expected body for ${name}`.red_lt;
-                (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, `blk stmt[${inx}/${all.length}]`, nest + LEVEL); });
+                evt.children = ["body[]"];
+                (ast_node.body || []).forEach((stmt, inx, all) => { this.traverse(stmt, `blk stmt[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "VariableDeclaration": //{type, declarations[], kind}
-                console.error(`${nest}'${name}': var decl, ${ast_node.declarations.length} dcls, kind ${ast_node.kind}`);
-                (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(Object.assign({kind: ast_node.kind}, dcl), `${ast_node.kind} decl[${inx}/${all.length}]`, nest + LEVEL); });
+//                console.error(`${nest}'${name}': var decl, ${ast_node.declarations.length} dcls, kind ${ast_node.kind}`);
+                evt.children = ["declarations[]"];
+                (ast_node.declarations || []).forEach((dcl, inx, all) => { this.traverse(Object.assign({kind: ast_node.kind}, dcl), `${ast_node.kind} decl[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "VariableDeclarator": //{type, id, init{}, kind-inherited}
-                console.error(`${nest}'${name}': def name '${nameof(ast_node.id)}', kind ${ast_node.kind}`);
-                THIS.symtab[nameof(ast_node.id)] = ast_node;
-                traverse(ast_node.init, `${nameof(ast_node.id)}.init`, nest + LEVEL);
+//                console.error(`${nest}'${name}': def name '${nameof(ast_node.id)}', kind ${ast_node.kind}`);
+//                THIS.symtab[nameof(ast_node.id)] = ast_node;
+                evt.children = ["init"];
+                this.traverse(ast_node.init, `${nameof(ast_node.id)}.init`, nest + LEVEL);
                 break;
             case "ArrayExpression": //{type, elements[]}
-                console.error(`${nest}'${name}': arr expr, ${ast_node.elements.length} exprs`);
-                (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+//                console.error(`${nest}'${name}': arr expr, ${ast_node.elements.length} exprs`);
+                evt.children = ["elements[]"];
+                (ast_node.elements || []).forEach((expr, inx, all) => { this.traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "ExpressionStatement": //{type, expression{}}
-                console.error(`${nest}'${name}': expr stmt`);
-                traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+//                console.error(`${nest}'${name}': expr stmt`);
+                evt.children = ["expression"];
+                this.traverse(ast_node.expression, "expr stmt", nest + LEVEL);
                 break;
             case "CallExpression": //{type, callee{}, arguments[]}
 //            if (!THIS.seen) THIS.seen = {};
 //            if (!THIS.funclist) THIS.funclist = [];
-                console.error(`${nest}'${name}': call expr to ${nameof(ast_node.callee)}: ${arguments.length} args, already seen? ${!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//                console.error(`${nest}'${name}': call expr to ${nameof(ast_node.callee)}: ${arguments.length} args, already seen? ${!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
 //            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
-                (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
-                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+                evt.children = ["arguments[], callee"];
+                (ast_node.arguments || []).forEach((arg, inx, all) => { this.traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+//                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
                 break;
             case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
-                console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
+//                console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
+                evt.children = ["params[]", "defaults[]", "body"];
                 (ast_node.params || []).forEach((param, inx, all) => { console.error(`${nest}param ${param}`); });
-                (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
-                traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
+                (ast_node.defaults || []).forEach((def, inx, all) => { this.traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+                this.traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
                 break;
             case "BinaryExpression": //{type, operator, left{}, right{}}
             case "LogicalExpression": //{type, operator, left{}, right{}}
-                console.error(`${nest}'${name}': ${ast_node.type.slice(0, 3)} expr, op ${ast_node.operator}`);
-                traverse(ast_node.left, "lhs", nest + LEVEL);
-                traverse(ast_node.right, "rhs", nest + LEVEL);
+//                console.error(`${nest}'${name}': ${ast_node.type.slice(0, 3)} expr, op ${ast_node.operator}`);
+                evt.children = ["left", "right"];
+                this.traverse(ast_node.left, "lhs", nest + LEVEL);
+                this.traverse(ast_node.right, "rhs", nest + LEVEL);
                 break;
             case "UnaryExpression": //{type, operator, argument{}}
-                console.error(`${nest}'${name}': unary expr, op ${ast_node.operator}`);
-                traverse(ast_node.argument, "unop-arg", nest + LEVEL);
+//                console.error(`${nest}'${name}': unary expr, op ${ast_node.operator}`);
+                evt.children = ["argument"];
+                this.traverse(ast_node.argument, "unop-arg", nest + LEVEL);
                 break;
             case "UpdateExpression": //{type, operator, argument{}, prefix}
-                console.error(`${nest}'${name}': upd expr, op ${ast_node.operator}, prefix? ${ast_node.prefix}`);
-                traverse(ast_node.argument, "updop-arg", nest + LEVEL);
+//                console.error(`${nest}'${name}': upd expr, op ${ast_node.operator}, prefix? ${ast_node.prefix}`);
+                evt.children = ["argument"];
+                this.traverse(ast_node.argument, "updop-arg", nest + LEVEL);
                 break;
             case "AssignmentExpression": //{type, operator, left{}, right{}}
-                console.error(`${nest}'${name}': asst expr, op ${ast_node.operator}`);
-                traverse(ast_node.left, "asst-lhs", nest + LEVEL);
-                traverse(ast_node.right, "asst-rhs", nest + LEVEL);
+//                console.error(`${nest}'${name}': asst expr, op ${ast_node.operator}`);
+                evt.children = ["left", "right"];
+                this.traverse(ast_node.left, "asst-lhs", nest + LEVEL);
+                this.traverse(ast_node.right, "asst-rhs", nest + LEVEL);
                 break;
             case "NewExpression": //{type, callee{}, arguments[]}
-                console.error(`${nest}'${name}': new expr to ${nameof(ast_node.callee)}: ${arguments.length} args!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
+//                console.error(`${nest}'${name}': new expr to ${nameof(ast_node.callee)}: ${arguments.length} args!!THIS.seen[nameof(ast_node.callee)]}`); //, ${JSON.stringify(ast_node.callee)}`);
 //            var callee = (ast_node.callee.type == "MemberExpression")? `${ast_node.callee.object.name}.${ast_node.callee.property.name}`: ast_node.callee.name;
-                (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
-                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+                evt.children = ["arguments[]", "callee"];
+                (ast_node.arguments || []).forEach((arg, inx, all) => { this.traverse(arg, `arg[${inx}/${all.length}]`, nest + LEVEL); });
+//                if (!THIS.seen[nameof(ast_node.callee)]) THIS.seen[nameof(ast_node.callee)] = null; //leave placeholder for AST; traverse later; //toAST(ast_node.callee); //{ THIS.funclist.push(nameof(ast_node.callee)); }
+                this.traverse(ast_node.callee, "callee", nest + LEVEL);
                 break;
             case "ForStatement": //{type, init{}, test{}, update{}, body{}}
-                console.error(`${nest}'${name}': for stmt`)
-                traverse(ast_node.init, "for-init", nest + LEVEL);
-                traverse(ast_node.test, "for-test", nest + LEVEL);
-                traverse(ast_node.update, "for-upd", nest + LEVEL);
-                traverse(ast_node.body, "for-body", nest + LEVEL);
+//                console.error(`${nest}'${name}': for stmt`)
+                evt.children = ["init","test","update","body"];
+                this.traverse(ast_node.init, "for-init", nest + LEVEL);
+                this.traverse(ast_node.test, "for-test", nest + LEVEL);
+                this.traverse(ast_node.update, "for-upd", nest + LEVEL);
+                this.traverse(ast_node.body, "for-body", nest + LEVEL);
                 break;
             case "WhileStatement": //{type, test{}, body{}}
-                console.error(`${nest}'${name}': while stmt`)
-                traverse(ast_node.test, "while-test", nest + LEVEL);
-                traverse(ast_node.body, "while-body", nest + LEVEL);
+//                console.error(`${nest}'${name}': while stmt`)
+                evt.children = ["test","body"];
+                this.traverse(ast_node.test, "while-test", nest + LEVEL);
+                this.traverse(ast_node.body, "while-body", nest + LEVEL);
                 break;
             case "SwitchStatement": //{type, discriminant{}, cases[]}
-                console.error(`${nest}'${name}': switch stmt, ${ast_node.cases.length} cases`);
-                traverse(ast_node.discriminant, "switch val", nest + LEVEL);
-                (ast_node.cases || []).forEach((casestmt, inx, all) => { traverse(casestmt, `case[${inx}/${all.length}]`, nest + LEVEL); });
+//                console.error(`${nest}'${name}': switch stmt, ${ast_node.cases.length} cases`);
+                evt.children = ["discriminant","cases[]"];
+                this.traverse(ast_node.discriminant, "switch val", nest + LEVEL);
+                (ast_node.cases || []).forEach((casestmt, inx, all) => { this.traverse(casestmt, `case[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "SwitchCase": //{type, test{}, consequent[]}
-                console.error(`${nest}'${name}': switch case, ${ast_node.consequent.length} consequents`)
-                traverse(ast_node.test, "switch test", nest + LEVEL);
-                (ast_node.consequent || []).forEach((conseq, inx, all) => { traverse(conseq, `consequent[${inx}/${all.length}]`, nest + LEVEL); });
+//                console.error(`${nest}'${name}': switch case, ${ast_node.consequent.length} consequents`)
+                evt.children = ["test","consequent[]"];
+                this.traverse(ast_node.test, "switch test", nest + LEVEL);
+                (ast_node.consequent || []).forEach((conseq, inx, all) => { this.traverse(conseq, `consequent[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "ThrowStatement": //{type, argument{}}
-                console.error(`${nest}'${name}': throw stmt`)
-                traverse(ast_node.test, "throw stmt", nest + LEVEL);
+//                console.error(`${nest}'${name}': throw stmt`)
+                evt.children = ["argument"];
+                this.traverse(ast_node.test, "throw stmt", nest + LEVEL);
                 break;
             case "IfStatement": //{type, test{}, consequent{}, alternate{}}
-                console.error(`${nest}'${name}': if stmt`)
-                traverse(ast_node.test, "if test", nest + LEVEL);
-                traverse(ast_node.consequent, "if-true", nest + LEVEL);
-                traverse(ast_node.alternate, "if-false", nest + LEVEL);
+//                console.error(`${nest}'${name}': if stmt`)
+                evt.children = ["test","consequent","alternate"];
+                this.traverse(ast_node.test, "if test", nest + LEVEL);
+                this.traverse(ast_node.consequent, "if-true", nest + LEVEL);
+                this.traverse(ast_node.alternate, "if-false", nest + LEVEL);
                 break;
             case "YieldExpression": //{type, argument{}, delegate}
-                console.error(`${nest}'${name}': yield expr, delegate? ${ast_node.delegate}`);
-                traverse(ast_node.argument, "yield expr", nest + LEVEL);
+//                console.error(`${nest}'${name}': yield expr, delegate? ${ast_node.delegate}`);
+                evt.children = ["argument"];
+                this.traverse(ast_node.argument, "yield expr", nest + LEVEL);
                 break;
             case "TemplateLiteral": //{type, quasis[], expressions[]}
-                console.error(`${nest}'${name}': template lit, ${ast_node.quasis.length} quasis, ${ast_node.expressions.length} exprs`);
-                (ast_node.quasis || []).forEach((quasi, inx, all) => { traverse(quasi, `quasi[${inx}/${all.length}]`, nest + LEVEL); });
-                (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
+//                console.error(`${nest}'${name}': template lit, ${ast_node.quasis.length} quasis, ${ast_node.expressions.length} exprs`);
+                evt.children = ["quasis[]","expressions[]"];
+                (ast_node.quasis || []).forEach((quasi, inx, all) => { this.traverse(quasi, `quasi[${inx}/${all.length}]`, nest + LEVEL); });
+                (ast_node.expressions || []).forEach((expr, inx, all) => { this.traverse(expr, `expr[${inx}/${all.length}]`, nest + LEVEL); });
                 break;
             case "ReturnStatement": //{type, argument{}}
-                console.error(`${nest}'${name}': return stmt`);
-                traverse(ast_node.argument, "ret stmt", nest + LEVEL);
+//                console.error(`${nest}'${name}': return stmt`);
+                evt.children = ["argument"];
+                this.traverse(ast_node.argument, "ret stmt", nest + LEVEL);
                 break;
             case "ExpressionStatement": //{type, expression}
-                console.error(`${nest}'${name}': expr stmt`);
-                traverse(ast_node.expression, "expr stmt", nest + LEVEL);
+//                console.error(`${nest}'${name}': expr stmt`);
+                evt.children = ["expression"];
+                this.traverse(ast_node.expression, "expr stmt", nest + LEVEL);
                 break;
             case "Identifier": //{type, name}
-                console.error(`${nest}'${name}': ident '${ast_node.name}'`);
-                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+//                console.error(`${nest}'${name}': ident '${ast_node.name}'`);
+//                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
                 break;
             case "TemplateElement": //{type, value{}, tail}
-                console.error(`${nest}'${name}': templ element, raw '${ast_node.value.raw}', cooked '${ast_node.value.cooked}', tail? ${ast_node.tail}`)
+//                console.error(`${nest}'${name}': templ element, raw '${ast_node.value.raw}', cooked '${ast_node.value.cooked}', tail? ${ast_node.tail}`)
+                evt.children = ["value"];
                 break;
             case "BreakStatement": //{type, label}
-                console.error(`${nest}'${name}': break stmt, label '${ast_node.label}'`);
+//                console.error(`${nest}'${name}': break stmt, label '${ast_node.label}'`);
                 break;
             case "EmptyStatement": //{type}
-                console.error(`${nest}'${name}': empty stmt`);
+//                console.error(`${nest}'${name}': empty stmt`);
                 break;
             case "Literal" : //{type, value, raw}
-                console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
+//                console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
                 break;
             case "MemberExpression": //{type, computed, object{}, property{}}
-                console.error(`${nest}'${name}': member expr '${ast_node.object}' '${ast_node.property}'`);
-                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
+//                console.error(`${nest}'${name}': member expr '${ast_node.object}' '${ast_node.property}'`);
+                evt.children = ["object","property"];
+//                if (!THIS.seen[nameof(ast_node)]) THIS.seen[nameof(ast_node)] = null; //leave placeholder for AST; traverse later
                 break;
             default: //for debug
-                throw `AST traverse: unhandled node type for ${name}: type '${ast_node.type}', node ${JSON.stringify(ast_node, null, "  ")}`.red_lt;
+                throw `AST traverse: unhandled node type for ${name}: type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
         }
-        return true;
+        retstrm.emit("astnode", evt);
+//        return true;
 //        return ast;
     }
 
@@ -418,6 +458,13 @@ function walkAST(opts) //{}
 ////
 /// Helper functions/misc exports:
 //
+
+const sv_stringify = JSON5.stringify;
+JSON5.stringify = function(args)
+{
+//    console.error("json5.stringify: " + typeof sv_stringify);
+    return sv_stringify.apply(JSON5, Array.from(arguments)).replace(/,([a-z0-9])/gi, ", $1").replace(/:/g, ": "); //put a space after comma and color for easier readability
+}
 
 
 //single-step thru generator function (for sim/debug):
@@ -511,7 +558,7 @@ function CLI(more_opts)
 //    const {LineStream} = require('byline');
     const CWD = "";
 //    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
-    const opts = {}, debug_out = [];
+    const opts = Object.assign({}, more_opts || {}), debug_out = [];
     for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
         shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
         {
@@ -536,7 +583,7 @@ function CLI(more_opts)
 //        .pipe(fixups())
 //        .pipe(preproc(opts))
 //        .pipe(ReplStream(opts))
-        .pipe(dsl2ast(Object.assign(opts, more_opts || {})))
+        .pipe(dsl2ast(opts)) //Object.assign(opts, more_opts || {})))
 //        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
 //        .pipe((!opts.src && !opts.codegen)? js2ast(opts): new PassThrough())
 //        .pipe(asm_optimize())
@@ -545,15 +592,17 @@ function CLI(more_opts)
 //        .pipe(RequireStream())
 //        .pipe(json2ast())
 //        .pipe((opts.codegen /*!= undefined*/)? new PassThrough(): js2ast(opts))
-        .pipe(outstrm)
+        .pipe(walkAST(opts))
+//        .on("astnode", data => { console.error(`ast node: ${JSON5.stringify(data)}`.cyan_lt)})
+//??        .pipe(outstrm)
 //        .on("data", (data) => { console.error(`data: ${data}`.blue_lt)})
-        .on("finish", () => { console.error("finish".green_lt); })
-        .on("close", () => { console.error("close".green_lt); })
-        .on("done", () => { console.error("done".green_lt); })
-        .on("end", () => { console.error("end".green_lt); })
+        .on("finish", () => { console.error("ast strm: finish".green_lt); })
+        .on("close", () => { console.error("ast strm: close".green_lt); })
+        .on("done", () => { console.error("ast strm: done".green_lt); })
+        .on("end", () => { console.error("ast strm: end".green_lt); })
         .on("error", err =>
         {
-            console.error(`error: ${err}`.red_lt);
+            console.error(`ast strm error: ${err}`.red_lt);
             process.exit();
         });
     console.error("DSL engine: finish asynchronously".green_lt);
