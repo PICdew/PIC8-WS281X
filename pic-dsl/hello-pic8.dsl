@@ -8,7 +8,7 @@ console.log("opts: " + JSON5.stringify(opts));
 var TRISA, PORTA, TMR1, T1IF;
 
 //this function called by -run command-line arg:
-function run()
+function autoexec()
 {
 //    console.error("dsl run ...".green_lt);
     var ticker = 
