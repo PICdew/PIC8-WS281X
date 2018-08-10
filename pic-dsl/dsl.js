@@ -207,20 +207,150 @@ function walkAST(opts) //{}
         if (this.chunks)
         {
             const ast_raw = JSON5.parse(this.chunks.join("\n")); //rebuild AST in memory
-            const ast = !opts.reduce? reduce(ast_raw): ast_raw;
+            this.vars = {};
+            this.funcs = {};
+            this.consts = {};
+            const ast = !opts.reduce? this.reduce(ast_raw): ast_raw;
             if (opts.ast && !opts.reduce) console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST also
             this.traverse(ast, "entpt"); //emit events for AST nodes
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
+//            this.push(`walked ast, ${Object.keys(this.consts).length} consts: ${Object.keys(this.consts).join(", ")}\n`);
             this.push("walked ast\n");
+            console.error(`walked ast`);
+            console.error(`${Object.keys(this.vars).length} vars: ${Object.keys(this.vars).join(", ")}`);
+            console.error(`${Object.keys(this.funcs).length} funcs: ${Object.keys(this.funcs).join(", ")}`);
+            console.error(`${Object.keys(this.consts).length} consts: ${Object.keys(this.consts).join(", ")}`);
         }
         else this.push("no output :(\n");
         cb();
     }
 
-//coalesce compile-time constants:
+//coalesce compile-time constants, drop run-time functions:
     function reduce(ast_node)
     {
+//        const EMPTY_STMT = {type: "EmptyStatement"};
+        const NULL_EXPR = makeconst(null); //{type: "Literal", value: null, raw: null};
+
+        if (ast_node)
+        switch (ast_node.type)
+        {
+            case "CallExpression": //{type, callee{}, arguments[]}
+                if (dropcall(nameof(ast_node.callee))) return NULL_EXPR; //exclude Node.js run-time functions
+                (ast_node.arguments || []).forEach((arg, inx, all) => { all[inx] = this.reduce(arg); });
+                if (ast_node.arguments.every((arg) => { return isconst(arg); }))
+//                    if (isconst(ast_node)) return makeconst(eval(`${nameof(ast_node.callee)}()
+                    if (nameof(ast_node.callee).match(/^Math\./)) return makeconst(`${nameof(ast_node.callee)}(${ast_node.arguments.map((arg) => { return arg.value; }).join(", ")})`);
+                break;
+            case "BinaryExpression": //{type, operator, left{}, right{}}
+            case "LogicalExpression": //{type, operator, left{}, right{}}
+            case "AssignmentExpression": //{type, operator, left{}, right{}}
+                ast_node.left = this.reduce(ast_node.left);
+                ast_node.right = this.reduce(ast_node.right);
+//                console.error(`coalese lhs ${ast_node.left.type} ${ast_node.operator} rhs ${ast_node.right.type}? ${isconst(ast_node.left) && isconst(ast_node.right)}`);
+                if (isconst(ast_node.left) && isconst(ast_node.right)) return makeconst(`${ast_node.left.value} ${ast_node.operator} ${ast_node.right.value}`);
+                break;
+            case "BlockStatement": //{type, body[]}
+                var numdrop = 0;
+                (ast_node.body || []).forEach((stmt, inx, all) => { if (isconst(all[inx - numdrop] = this.reduce(stmt))) ++numdrop; });
+                if (numdrop)
+                    if (numdrop == ast_node.body.length) return NULL_EXPR;
+                    else ast_node.body.splice(-numdrop, numdrop);
+                break;
+            case "ExpressionStatement": //{type, expression{}}
+                ast_node.expression = this.reduce(ast_node.expression);
+                if (isconst(ast_node.expression)) return NULL_EXPR; //EMPTY_STMT; //stmt has no effect; drop it
+                break;
+            case "VariableDeclarator": //{type, id, init{}, kind-inherited}
+                ast_node.init = this.reduce(ast_node.init);
+                const type = (ast_node.kind == "const")? "consts": "vars";
+                if (nameof(ast_node) in this[type]) throw `duplicate ${type} def: ${nameof(ast_node)}`.red_lt;
+                this[type][nameof(ast_node)] = isconst(ast_node.init)? ast_node.init.value: "TODO: eval?";
+                break;
+            case "Identifier": //{type, name}
+                if (ast_node.name in this.consts) return makeconst(this.consts[ast_node.name]); //promote to const
+                break;
+            case "FunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+            case "FunctionDeclaration": //{type, id{}, params[], defaults[], body{}, generator, expression}
+                (ast_node.params || []).forEach((param, inx, all) => { all[inx] = this.reduce(param); });
+                (ast_node.defaults || []).forEach((def, inx, all) => { all[inx] = this.reduce(def); });
+                ast_node.body = this.reduce(ast_node.body);
+                if (nameof(ast_node) in this.funcs) throw `duplicate func def: ${nameof(ast_node)}`.red_lt;
+                this.funcs[nameof(ast_node)] = isconst(ast_node.body)? ast_node.body.value: "TODO: func val?";
+                break;
+            case "IfStatement": //{type, test{}, consequent{}, alternate{}}
+                ast_node.test = this.reduce(ast_node.test);
+                ast_node.consequent = this.reduce(ast_node.consequent);
+                ast_node.alternate = this.reduce(ast_node.alternate);
+                if (isconst(ast_node.test)) return ast_node.test.value? ast_node.consequent: ast_node.alternate;
+                break;
+            case "ForStatement": //{type, init{}, test{}, update{}, body{}}
+                ast_node.init = this.reduce(ast_node.init);
+                ast_node.test = this.reduce(ast_node.test);
+                ast_node.update = this.reduce(ast_node.update);
+                ast_node.body = this.reduce(ast_node.body);
+                if (isconst(ast_node.test) && !ast_node.test.value) return ast_node.init; //no body needed
+                break;
+            case "WhileStatement": //{type, test{}, body{}}
+                ast_node.test = this.reduce(ast_node.test);
+                ast_node.body = this.reduce(ast_node.body);
+                if (isconst(ast_node.test) && !ast_node.test.value) return NULL_EXPR; //no body needed
+                break;
+            case "UnaryExpression": //{type, operator, argument{}}
+            case "UpdateExpression": //{type, operator, argument{}, prefix}
+                ast_node.argument = this.reduce(ast_node.argument);
+                if (isconst(ast_node.argument)) return makeconst(`${(ast_node.prefix !== false)? ast_node.operator: ""} ${ast_node.argument.value} ${(ast_node.prefix === false)? ast_node.operator: ""}`);
+                break;
+//////////////
+            case "VariableDeclaration": //{type, declarations[], kind}
+                (ast_node.declarations || []).forEach((dcl, inx, all) => { all[inx] = this.reduce(Object.assign({kind: ast_node.kind}, dcl)); });
+                break;
+            case "ArrayExpression": //{type, elements[]}
+                (ast_node.elements || []).forEach((expr, inx, all) => { all[inx] = this.reduce(expr); });
+                break;
+            case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
+                (ast_node.params || []).forEach((param, inx, all) => { all[inx] = this.reduce(def, `param[${inx}/${all.length}]`, nest + LEVEL); });
+                (ast_node.defaults || []).forEach((def, inx, all) => { all[inx] = this.reduce(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
+                ast_node.body = this.reduce(ast_node.body);
+                break;
+            case "ThrowStatement": //{type, argument{}}
+            case "YieldExpression": //{type, argument{}, delegate}
+            case "ReturnStatement": //{type, argument{}}
+            case "ThisExpression": //{type}
+                ast_node.argument = this.reduce(ast_node.argument);
+                break;
+            case "NewExpression": //{type, callee{}, arguments[]}
+                (ast_node.arguments || []).forEach((arg, inx, all) => { all[inx] = this.reduce(arg); });
+                ast_node.callee = this.reduce(ast_node.callee);
+                break;
+            case "SwitchStatement": //{type, discriminant{}, cases[]}
+                ast_node.discriminant = this.reduce(ast_node.discriminant);
+                (ast_node.cases || []).forEach((casestmt, inx, all) => { all[inx] = this.reduce(casestmt); });
+                if (isconst(ast_node.discriminant)) console.error("TODO: reduce switch stmt".red_lt);
+                break;
+            case "SwitchCase": //{type, test{}, consequent[]}
+                ast_node.test = this.reduce(ast_node.test);
+                (ast_node.consequent || []).forEach((conseq, inx, all) => { all[inx] = this.reduce(conseq); });
+                break;
+            case "TemplateLiteral": //{type, quasis[], expressions[]}
+                (ast_node.quasis || []).forEach((quasi, inx, all) => { all[inx] = this.reduce(quasi); });
+                (ast_node.expressions || []).forEach((expr, inx, all) => { all[inx] = this.reduce(expr); });
+//TODO                if (isconst(ast_node....)) console.error("TODO: reduce string".red_lt);
+                break;
+            case "TemplateElement": //{type, value{}, tail}
+                ast_node.value = this.reduce(ast_node.value);
+                break;
+            case "MemberExpression": //{type, computed, object{}, property{}}
+                ast_node.object = this.reduce(ast_node.object);
+                ast_node.property = this.reduce(ast_node.property);
+                break;
+            case "BreakStatement": //{type, label}
+            case "EmptyStatement": //{type}
+            case "Literal" : //{type, value, raw}
+                break;
+            default: //for debug
+                throw `AST reduce: unhandled node type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
+        }
         return ast_node;
     }
 
@@ -304,7 +434,7 @@ function walkAST(opts) //{}
             case "ArrowFunctionExpression": //{type, id{}, params[], defaults[], body{}, generator, expression}
 //                console.error(`${nest}'${name}': arrow expr '${name || ast_node.id.name}', ${ast_node.params.length} params, ${ast_node.defaults.length} defaults`);
                 evt.children = ["params[]", "defaults[]", "body"];
-                (ast_node.params || []).forEach((param, inx, all) => { console.error(`${nest}param ${param}`); });
+                (ast_node.params || []).forEach((param, inx, all) => { this.traverse(param, `param[${inx}/${all.length}`, nest + LEVEL); });
                 (ast_node.defaults || []).forEach((def, inx, all) => { this.traverse(def, `def[${inx}/${all.length}]`, nest + LEVEL); });
                 this.traverse(ast_node.body, "ArrowFunctionExpression", nest + LEVEL);
                 break;
@@ -368,7 +498,7 @@ function walkAST(opts) //{}
             case "ThrowStatement": //{type, argument{}}
 //                console.error(`${nest}'${name}': throw stmt`)
                 evt.children = ["argument"];
-                this.traverse(ast_node.test, "throw stmt", nest + LEVEL);
+                this.traverse(ast_node.argument, "throw stmt", nest + LEVEL);
                 break;
             case "IfStatement": //{type, test{}, consequent{}, alternate{}}
 //                console.error(`${nest}'${name}': if stmt`)
@@ -393,7 +523,7 @@ function walkAST(opts) //{}
                 evt.children = ["argument"];
                 this.traverse(ast_node.argument, "ret stmt", nest + LEVEL);
                 break;
-            case "ExpressionStatement": //{type, expression}
+            case "ExpressionStatement": //{type, expression{}}
 //                console.error(`${nest}'${name}': expr stmt`);
                 evt.children = ["expression"];
                 this.traverse(ast_node.expression, "expr stmt", nest + LEVEL);
@@ -411,6 +541,8 @@ function walkAST(opts) //{}
                 break;
             case "EmptyStatement": //{type}
 //                console.error(`${nest}'${name}': empty stmt`);
+                break;
+            case "ThisExpression": //{type}
                 break;
             case "Literal" : //{type, value, raw}
 //                console.error(`${nest}'${name}': literal value '${ast_node.value}', raw '${ast_node.raw}'`);
@@ -440,11 +572,44 @@ function walkAST(opts) //{}
         switch ((ast_node || {}).type)
         {
             case "MemberExpression": return `${ast_node.object.name}.${ast_node.property.name}`;
-            case "FunctionExpression": return ast_node.id.name;
+            case "VariableDeclarator": return ast_node.id.name;
+            case "FunctionDeclaration": return (ast_node.id || {name: "UNNAMED"}).name;
+            case "FunctionExpression": return (ast_node.id || {name: "UNNAMED"}).name;
             case "Identifier": return ast_node.name;
             default: return `unamed ${(ast_node || {type: "(no type)"}).type}`;
 //            throw `AST nameof: unhandled node type: '${JSON.stringify(ast_node)}'`.red_lt; //for debug
         }
+    }
+
+    function dropcall(funcname)
+    {
+        const DROP_CALLS = [/^console\..*$/, /^setInterval$/, /^clearInterval$/];
+        return DROP_CALLS.some((pattern, inx, all) =>
+        {
+//            console.error(`drop[${inx}/${all.length}] call to '${funcname}'? ${!!funcname.match(pattern)}`);
+            return funcname.match(pattern);
+        });
+    }
+
+    function makeconst(value)
+    {
+        if (typeof value == "string")
+        {
+//            console.error(`mkconst('${value}') = ${eval(value)}`);
+            value = eval(value);
+        }
+        return {type: "Literal", value, raw: value};
+    }
+
+//    function isempty(ast_node) { return ((ast_node || {}).type == "EmptyStatement"); }
+
+//        const CONST_TYPES = "Literal,"
+    function isconst(ast_node)
+    {
+        if ((ast_node || {}).type == "Literal") return true;
+//        if ((ast_node || {}).kind == "const")
+//        if (((ast_node || {}).type == "Identifier") && (ast_node.name in this.consts)) return true;
+        return false;
     }
 
 //    function expected(name, what, want, is)
