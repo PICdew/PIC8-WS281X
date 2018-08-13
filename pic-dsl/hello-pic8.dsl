@@ -1,4 +1,6 @@
-#!./pic8-dsl.js -Xrun -ast -Xecho -Xreduce -Xcodegen -debug
+#!./pic8-dsl.js -debug -Xrun -Xecho -ast -Xno_reduce -Xno_codegen  #comment out this line for use with .load in Node.js REPL
+//NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
+
 //"use strict";
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
@@ -6,6 +8,23 @@ console.log("opts: " + JSON5.stringify(opts));
 
 //#include "pic16f1827.h"
 var TRISA, PORTA, TMR1, T1IF;
+
+#include("./hello-helper.dsl");
+#include "./hello-helper.dsl";
+#include "./hello-" + "helper.dsl"
+
+console.log("hello " + simple_func(4)); \
+    console.log("bye");
+#warning "message"
+#warning ("hi")
+#error `${simple_func(3+4)}`
+#warning simple_func(5)
+
+console.log("args: " + JSON.stringify(process.argv, null, "  "));
+
+//const a = [1, 2, 3];
+//a.forEach((v) => { console.error("loop: " + v + " " + simple_func(v)); });
+
 
 //this function called by -run command-line arg:
 function autoexec()
