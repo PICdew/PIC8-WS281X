@@ -4,8 +4,13 @@
 "use strict";
 require("magic-globals"); //__file, __line, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
+const fs = require("fs");
+const pathlib = require("path");
+const XRegEx = require("xregexp"); //https://github.com/slevithan/xregexp
 const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 //extensions();
+
+const CWD = ""; //param for pathlib.resolve()
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -126,9 +131,18 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
         }
         if (this.linebuf) //process or flush
         {
-            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
-    //            this.buf = parts? macro(parts[1], parts[2], this.linenum): macro(this.buf); //handle directives vs. expand macros
-            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
+            const PREPROC_xre = new XRegEx
+            (`
+                ^  #start of line
+                \s*  #ignore leading white space
+                # \s* ([a-z0-9_]+)  #directive name
+                \s* (.*)  #trailing stuff
+                \s* $  #ignore trailing white space
+            `, "xi");
+//            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
+            var parts = this.linebuf.match(PREPROC_xre /* /^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i */);
+            this.linebuf = parts? preproc(parts[1], parts[2], this.linenum): macro(this.linebuf); //handle directives vs. expand macros
+//            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
             this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
     //            this.push(chunk);
             this.linebuf = null;
@@ -151,7 +165,7 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
         this.chunks.splice(0, 0, `
             //PREFIX:
             "use strict";
-            const {step/*, walkAST*/} = require("./dsl.js");
+            const {step/*, include, walkAST*/} = require("./dsl.js");
             module.exports = function(){ //wrap all logic so it's included within AST
             ${opts.prefix || ""}
             `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
@@ -207,7 +221,7 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
         const stack = {symtab: {}};
         stack.new_frame = function()
         {
-            return {nested: (this.nested || 0) + 1, symtab: Object.assign({}, this.symtab || {}), new_frame: this.new_frame, }; //shallow copy to new stack frame
+            return {nest: (this.nest || 0) + 1, symtab: Object.assign({}, this.symtab || {}), new_frame: this.new_frame, }; //shallow copy to new stack frame
         }
         traverse(ast, stack, (evt, data) => { retval.emit(evt, data); });
         Object.keys(stack.symtab || {}).forEach((key) => { if (!stack.symtab[key]) warn(`undefined symbol in '${nameof(ast)}': ${symtype(stack.symtab[key])}:'${key}'`); }); //check for undefined stuff within this context
@@ -224,31 +238,30 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 }
 
 
-//store or expand macros:
-function macro(cmd, linebuf, linenum)
+//expand macros:
+function macro(linebuf)
+{
+//keep expanding while there is more to do:
+    while (Object.keys(macro.defs || {}).some((macro_name) =>
+    {
+        if (linebuf.match)
+//            if (macro.defs[m].arglist !== null) //with arg list
+//                linebuf.replace()
+//also: "#str" and "token ## token"
+        return false;
+    }));
+    return linebuf;
+}
+
+//preprocessor directives:
+function preproc(cmd, linebuf, linenum)
 {
     var parts;
-    if (arguments.length == 1) [cmd, linebuf] = [null, cmd];
+//    if (arguments.length == 1) [cmd, linebuf] = [null, cmd];
 //console.log(`macro: cmd '${cmd}', line '${(linebuf || "").replace(/\n/gm, "\\n")}'`);
     switch (cmd)
     {
 //        case "define"
-        case null: //expand macros
-/*
-            for (;;) //keep expanding while there is more to do
-            {
-                var expanded = 0;
-                for (var m in macro.defs || {})
-                {
-                    break;
-                    if (macro.defs[m].arglist !== null) //with arg list
-                        linebuf.replace()
-                }
-                break;
-            }
-*/
-//also: "#str" and "token ## token"
-            return linebuf;
         case "warning": //convert to console output (so that values will be expanded)
 //NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
             return `console.error(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
@@ -257,20 +270,40 @@ function macro(cmd, linebuf, linenum)
 //            return `console.error(${linebuf}); process.exit(1);`;
             return `throw ${linebuf}`; //leave quotes, parens as is
         case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
-//            parts = linebuf.match(/^\s*("([^"]+)"|([^ ])\s?)/);
-//            if (!parts) return warn(`invalid include file '${linebuf}' on line ${linenum}`);
+            const INCLUDE_xre = new XRegEx
+            (`
+                ^  #start of line (leading white space was already skipped)
+                (
+                    \( \s* " ([^"]+) " \s* \)  #quoted string within "()"
+                  | " ([^"]+) "  #or quoted string
+                  | ([^ ]+)  #or space-delimited string
+                )
+                ( \s* ; )?  #optional trailing ";"
+                \s* $  #ignore trailing white space
+            `, "xi");
+//            parts = linebuf.match(/^\s*(\(\s*([^"]+)\s*\)|"([^"]+)"|([^ ]+))(\s*;)?\s*$/); //quotes optional if no embedded spaces
+            parts = linebuf.match(INCLUDE_xre); //quotes optional if no embedded spaces
+            if (!parts) warn(`invalid include file '${linebuf}' on line ${linenum}`);
+            console.error(`'${linebuf}' => ${JSON5.stringify(parts)}`);
 //            const [instrm, outstrm] = [infile? fs.createReadStream(infile.slice(1, -1)): process.stdin, process.stdout];
 //console.error(`read file '${parts[2] || parts[3]}' ...`);
 //            var contents = fs.readFileSync(parts[2] || parts[3]); //assumes file is small; contents needed in order to expand nested macros so just use sync read
 //            return contents;
-            return `dsl_include(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
+//wrong            return `include(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
+            var filename = pathlib.relative(CWD, parts[1]); //pathlib.resolve(filename);
+//            console.error(`include file '${filename}'`);
+//            console.log(fs.readFileSync(filename)); //TODO: stream?
+//    fs.createReadStream(opts.filename);
+            return fs.readFileSync(filename); //TODO: stream?
         case "define": //save for later expansion
             if (!macro.defs) macro.defs = {};
-            parts = linebuf.match(/^([a-z0-9_]+)\s*(\(\s*([^)]*)\s*\)\s*)?(.*)$/i);
-            if (!parts) warn(`invalid macro definition ignored on line ${linenum}`);
-            else if (macro.defs[parts[1]]) warn(`duplicate macro '${parts[1]}' definition (line ${linenum}, prior was ${macro.defs[parts[1]].linenum})`);
-            else macro.defs[parts[1]] = {arglist: parts[3], body: parts[4], linenum};
-            return; //no output
+//TODO: allow reg ex name here, or special chars within name ~ awk patterns
+            parts = linebuf.match(/^([a-z0-9_]+)\s*(\(\s*([^)]*)\s*\)\s*)?(.*)$/i); //TODO: allow $ or @?
+            if (!parts) warn(`ignoring invalid macro definition on line ${linenum}`);
+            else if (macro.defs[parts[1]]) warn(`ignoring duplicate macro '${parts[1]}' definition on line ${linenum}, prior was ${macro.defs[parts[1]].linenum}`);
+            else macro.defs[parts[1]] = {/*pattern: new Regexp("[^a-z0-9_]" + parts[1],*/ arglist: parts[3], body: parts[4], linenum};
+            return `function ${parts[1]}${parts[2] || "()"} { ${parts[4]} }`; //convert to function def
+//            return; //no output
         default:
             warn(`ignoring unrecognized pre-processor directive '${cmd}' (line ${linenum})`);
             return linebuf;
@@ -305,6 +338,8 @@ const UnaryExpression = "UnaryExpression"; //{type, operator, argument{}}
 const UpdateExpression = "UpdateExpression"; //{type, operator, argument{}, prefix}
 const YieldExpression = "YieldExpression"; //{type, argument{}, delegate}
 const VariableDeclaration = "VariableDeclaration"; //{type, declarations[], kind}
+const ObjectExpression = "ObjectExpression"; //{type, properties[]}
+const Property = "Property"; //{type, key{}, computed, value{}, kind, method, shorthand}
 const ArrayExpression = "ArrayExpression"; //{type, elements[]}
 const ThrowStatement = "ThrowStatement"; //{type, argument{}}
 const ReturnStatement = "ReturnStatement"; //{type, argument{}}
@@ -508,6 +543,7 @@ function reduce(ast_node, parent) //, symtab)
                 ast_node.add_const(ast_node.body.value); //remember const values for expr optimization
                 return makeconst(ast_node.body.value).why("const func body");
             }
+//TODO?            if (ast_node.body.type != BlockStatement) ast_node.body = {type: BlockStatement, body: []}; //insert block stmt to hang var dcls from
             break;
         case IfStatement: //{type, test{}, consequent{}, alternate{}}
             ast_node.test = reduce(ast_node.test, ast_node);
@@ -537,6 +573,13 @@ function reduce(ast_node, parent) //, symtab)
             return ast_node.argument.why("drop 'yield'"); //drop yield and just use target function/expression
             break;
 //node types as-is:
+        case ObjectExpression: //{type, properties[]}
+            (ast_node.properties || []).forEach((prop, inx, all) => { all[inx] = reduce(prop, ast_node); });
+            break;
+        case Property: //{type, key{}, computed, value{}, kind, method, shorthand}
+            ast_node.key = reduce(ast_node.key, ast_node);
+            ast_node.value = reduce(ast_node.value, ast_node);
+            break;
         case ArrayExpression: //{type, elements[]}
             (ast_node.elements || []).forEach((expr, inx, all) => { all[inx] = reduce(expr, ast_node); });
             break;
@@ -604,7 +647,7 @@ function traverse(ast_node, context, emitter) //, nested)
         case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
             if (context.symtab[nameof(ast_node)]) throw `duplicate func def: ${nameof(ast_node)}`.red_lt;
             var locals = context.new_frame(); //static nesting
-            (ast_node.params || []).forEach((param, inx, all) => { traverse(param, locals, emitter); locals.symtab[nameof(param)] = param2var(param); }); //treat as defined vars
+            (ast_node.params || []).forEach((param, inx, all) => { traverse(param2var(param), locals, emitter); }); //locals.symtab[nameof(param)] = param2var(param); }); //treat params as defined vars
             (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, locals, emitter); });
             traverse(ast_node.body, locals, emitter);
 //                console.error(`upon ${nameof(ast_node)} exit, local symbols are: ${Object.keys(locals).map((key) => { return `${symtype(locals[key])}:${key}`; })}`);
@@ -664,6 +707,13 @@ function traverse(ast_node, context, emitter) //, nested)
 //            if (context.symtab[nameof(ast_node)]) throw `duplicate var def: ${nameof(ast_node)}`.red_lt;
 //            context.symtab[nameof(ast_node)] = ast_node; //"TODO: func val?"; //update parent context
             break;
+        case ObjectExpression: //{type, properties[]}
+            (ast_node.properties || []).forEach((prop, inx, all) => { traverse(prop, context, emitter); });
+            break;
+        case Property: //{type, key{}, computed, value{}, kind, method, shorthand}
+            traverse(ast_node.key, context, emitter);
+            traverse(ast_node.value, context, emitter);
+            break;
         case ArrayExpression: //{type, elements[]}
             (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, context, emitter); });
             break;
@@ -702,7 +752,7 @@ function traverse(ast_node, context, emitter) //, nested)
         default: //for debug
             throw `AST traverse: unhandled node type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
     }
-    ast_node.nesting = context.nesting || 0; //send call-graph (nesting level) downstream
+    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
     emitter("ast-node", ast_node); //pass downstream for custom processing so caller can handle nodes of interest
 //    return ast_node;
 }
@@ -775,10 +825,13 @@ function getconst(ast_node)
     return (ast_node.type == Literal)? ast_node.value: null;
 }
 
+//var param ident in var decl:
+//allows caller to handle vars more consistently (function params behave like local vars)
 function param2var(param_node)
 {
 //    return new AstNode({type: VariableDeclarator, id: param_node, init: null, kind: "var"});
-    return new AstNode({type: VariableDeclarator, kind: "var", }).add_ident(param_node.name);
+//    return new AstNode({type: VariableDeclarator, kind: "var", }).add_ident(param_node.name);
+    return {type: VariableDeclarator, id: param_node, kind: "var", };
 }
 
 function symtype(ast_node)
@@ -835,6 +888,19 @@ function step(gen)
     setImmediate(step); //give other events a chance to fire, then step main again
 }
 //for (;;) { if (gen.next().done) break; }
+
+
+/*
+//read source file (for #include):
+module.exports.include =
+function include(filename)
+{
+    filename = pathlib.relative(CWD, filename); //pathlib.resolve(filename);
+    console.error(`include file '${filename}'`);
+    console.log(fs.readFileSync(filename)); //TODO: stream?
+//    fs.createReadStream(opts.filename);
+}
+*/
 
 
 const error =
@@ -931,9 +997,6 @@ function extensions()
 /// Unit test/Command-line interface:
 //
 
-const pathlib = require("path");
-const fs = require("fs");
-
 const CLI =
 module.exports.CLI =
 function CLI(more_opts)
@@ -941,7 +1004,7 @@ function CLI(more_opts)
 //    const RequireFromString = require('require-from-string');
 //    const Collect = require("collect-strean");
 //    const {LineStream} = require('byline');
-    const CWD = "";
+//    const CWD = "";
 //    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
     const opts = CLI.opts = Object.assign({}, more_opts || {}), debug_out = [];
     for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)

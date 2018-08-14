@@ -21,6 +21,7 @@
     "magic-globals": "^0.9.1",
     "require-from-string": "^2.0.2",
     "through2": "^2.0.3",
-    "to-ast": "^1.0.0"
+    "to-ast": "^1.0.0",
+    "xregexp": "^4.2.0"
   }
 }

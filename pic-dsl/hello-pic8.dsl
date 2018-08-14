@@ -1,4 +1,4 @@
-#!./pic8-dsl.js -debug -Xrun -Xecho -ast -Xno_reduce -Xno_codegen  #comment out this line for use with .load in Node.js REPL
+#!./pic8-dsl.js -debug -Xrun -echo -Xast -Xno_reduce -Xno_codegen  #comment out this line for use with .load in Node.js REPL
 //NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
 //"use strict";
@@ -7,7 +7,9 @@
 console.log("opts: " + JSON5.stringify(opts));
 
 //#include "pic16f1827.h"
-var TRISA, PORTA, TMR1, T1IF;
+const TRISA_ADDR = 0x91, PORTA_ADDR = 0x11;
+function reg8(addr) { return {addr, }; }
+var TRISA = reg8(0x91), PORTA = reg8(0x11), TMR1, T1IF;
 
 #include("./hello-helper.dsl");
 #include "./hello-helper.dsl";
