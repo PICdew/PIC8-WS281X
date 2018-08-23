@@ -132,18 +132,18 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
         if (this.linebuf) //process or flush
         {
             const PREPROC_xre = new XRegEx
-            (`
-                ^  #start of line
+            (
+                `^  #start of line
                 \s*  #ignore leading white space
-                # \s* ([a-z0-9_]+)  #directive name
+                \# \s* ([a-z0-9_]+)  #directive name
                 \s* (.*)  #trailing stuff
-                \s* $  #ignore trailing white space
-            `, "xi");
+                \s* $  #ignore trailing white space`, "xi");
 //            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
             var parts = this.linebuf.match(PREPROC_xre /* /^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i */);
+console.error(this.numlines + " " + JSON5.stringify(parts)); //NOTE: log() causes inf loop
             this.linebuf = parts? preproc(parts[1], parts[2], this.linenum): macro(this.linebuf); //handle directives vs. expand macros
 //            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
-            this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
+            if (this.linebuf) this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
     //            this.push(chunk);
             this.linebuf = null;
         }
