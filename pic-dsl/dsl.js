@@ -6,10 +6,17 @@ require("magic-globals"); //__file, __line, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 const fs = require("fs");
 const pathlib = require("path");
-const XRegEx = require("xregexp"); //https://github.com/slevithan/xregexp
+const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
 const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
-//extensions();
+extensions();
 
+debugger;
+const re_test = XRegExp(`(?<year>[0-9]{4} ) -?  # year
+          (?<month>[0-9]{2} ) -?  # month
+          (?<day>[0-9]{2} )     # day`, 'x');
+const result = re_test.exec("2015-01-02");
+console.log(result.year, (result.groups || {}).year, JSON5.stringify(result));
+ 
 const CWD = ""; //param for pathlib.resolve()
 
 
@@ -131,17 +138,20 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
         }
         if (this.linebuf) //process or flush
         {
-            const PREPROC_xre = new XRegEx
+//    `(?<year>  [0-9]{4} ) -?  # year
+//     (?<month> [0-9]{2} ) -?  # month
+//     (?<day>   [0-9]{2} )     # day`, 'x');
+            const PREPROC_xre = new XRegExp
             (
                 `^  #start of line
                 \s*  #ignore leading white space
-                \# \s* ([a-z0-9_]+)  #directive name
-                \s* (.*)  #trailing stuff
-                \s* $  #ignore trailing white space`, "xi");
+                \\# \s* (?<directive> [a-z0-9_]+ )  #directive name
+                \s* (?<trailer> .*? )  #trailing stuff (non-greedy)
+                \s* ;? \s* $  #ignore trailing delimiter and/or white space`, "xi");
 //            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
             var parts = this.linebuf.match(PREPROC_xre /* /^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i */);
-console.error(this.numlines + " " + JSON5.stringify(parts)); //NOTE: log() causes inf loop
-            this.linebuf = parts? preproc(parts[1], parts[2], this.linenum): macro(this.linebuf); //handle directives vs. expand macros
+if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //NOTE: log() causes inf loop
+            this.linebuf = parts? preproc(parts.directive, parts.trailer, this.linenum): macro(this.linebuf); //handle directives vs. expand macros
 //            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
             if (this.linebuf) this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
     //            this.push(chunk);
@@ -270,7 +280,7 @@ function preproc(cmd, linebuf, linenum)
 //            return `console.error(${linebuf}); process.exit(1);`;
             return `throw ${linebuf}`; //leave quotes, parens as is
         case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
-            const INCLUDE_xre = new XRegEx
+            const INCLUDE_xre = new XRegExp
             (`
                 ^  #start of line (leading white space was already skipped)
                 (
@@ -869,14 +879,6 @@ function debug_node(node_data)
 /// Helper functions/misc exports:
 //
 
-const sv_stringify = JSON5.stringify;
-JSON5.stringify = function(args)
-{
-//    console.error("json5.stringify: " + typeof sv_stringify);
-    return sv_stringify.apply(JSON5, Array.from(arguments)).replace(/,([a-z0-9])/gi, ", $1").replace(/:/g, ": "); //put a space after comma and color for easier readability
-}
-
-
 //single-step thru generator function (for sim/debug):
 module.exports.step =
 function step(gen)
@@ -979,17 +981,28 @@ function str_trim(str) //trim quotes and trailing semi-colon; NOTE: assumes only
 //}
 
 //prototype extensions:
-/*
 function extensions()
 {
+/*
     if (!Array.prototype.last)
         Object.defineProperty(Array.prototype, "last",
         {
             get() { return this[this.length - 1]; },
             set(newval) { if (this.length) this[this.length - 1] = newval; else this.push(newval); return this; },
         });
-}
 */
+    JSON5.sv_stringify = JSON5.stringify;
+    JSON5.stringify = function(args)
+    {
+//    console.error("json5.stringify: " + typeof sv_stringify);
+        return this.sv_stringify.apply(JSON5, Array.from(arguments)).replace(/,([a-z0-9])/gi, ", $1").replace(/:/g, ": "); //put a space after comma and color for easier readability
+    }
+//XRegExp is interchangeable with RE, so make the API interchangeable as well:
+//    console.log(String.prototype.match.toString());
+    String.prototype.sv_match = String.prototype.match;
+    String.prototype.match = function(re) { return (typeof re == "XRegExp")? XRegExp.exec(this, re): this.sv_match(re); }
+//    console.log(String.prototype.match.toString());
+}
 
 
 /////////////////////////////////////////////////////////////////////////////////
