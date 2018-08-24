@@ -65,7 +65,7 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
     const outstrm = instrm
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
-        .pipe(thru2(xform, flush)); //syntax fixups
+        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
 /*NOTE: REPL doesn't really add any value - can load module from source code instead
     if ("run" in opts) //execute logic
     {
