@@ -13,7 +13,8 @@ var TRISA = reg8(0x91), PORTA = reg8(0x11), TMR1, T1IF;
 
 #include("./hello-helper.dsl");
 #include "./hello-helper.dsl";
-#include "./hello-" + "helper.dsl"
+#include ./hello-helper.dsl
+#include "./hello-" + "helper.dsl" ;
 
 console.log("hello " + simple_func(4)); \
     console.log("bye");

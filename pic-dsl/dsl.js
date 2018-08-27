@@ -10,13 +10,36 @@ const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
 const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 extensions();
 
-debugger;
-const re_test = XRegExp(`(?<year>[0-9]{4} ) -?  # year
-          (?<month>[0-9]{2} ) -?  # month
-          (?<day>[0-9]{2} )     # day`, 'x');
-const result = re_test.exec("2015-01-02");
-console.log(result.year, (result.groups || {}).year, JSON5.stringify(result));
- 
+//https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative
+//use negative lookahead instead:   (?<!filename)\.js$   ==>  (?!.*filename\.js$).*\.js$
+const CommentsNewlines_re = /(?<![\\])#.*\n|\n/g;  //strip comments + newlines in case caller comments out parent line
+console.error(`test ${JSON5.stringify(quostr("test"))}`.yellow_lt);
+
+const xre_test = XRegExp(`
+    ^ \\s*  #start of string (leading white space should already have been skipped)
+    ${quostr("inner")}  #optionally quoted string
+#    (?<quotype1> ['"]) (?<inner> .*) \\k<quotype1>
+    ( \\s* ; )?  #optional trailing ";"
+    \\s* $  #ignore trailing white space
+    `.replace(CommentsNewlines_re, ""), 'xi');
+        
+var test = " 'a \"string' ".match(xre_test);
+if (!test) test = {quote: "NOPE", inner: "NOPE"};
+console.error("match1?".cyan_lt, JSON5.stringify(test), `#${test.quotype1}#`, `#${test.inner}#`);
+//test = "\"this is \\\"another 'string'\"".match(xre_test);
+//console.error("match2?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#${test.inner}#`);
+process.exit(0);
+
+//debugger;
+//console.log(JSON5.stringify(eval("'hi,' + ' there'")));
+//const re_test = XRegExp(`(?<year>[0-9]{4} ) -?  # year
+//          (?<month>[0-9]{2} ) -?  # month
+//          (?<day>[0-9]{2} )     # day`, 'x');
+//const result = "2015-01-02".match(re_test); //XRegExp.exec("2015-01-02", re_test);
+//console.log(`match yr ${result.year}, mon ${result.month}, day ${result.day}, result ${JSON5.stringify(result)}`.blue_lt);
+//console.log(`re ${JSON5.stringify(re_test)}`.blue_lt);
+//process.exit(0);
+
 const CWD = ""; //param for pathlib.resolve()
 
 
@@ -141,16 +164,20 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //    `(?<year>  [0-9]{4} ) -?  # year
 //     (?<month> [0-9]{2} ) -?  # month
 //     (?<day>   [0-9]{2} )     # day`, 'x');
-            const PREPROC_xre = new XRegExp
-            (
-                `^  #start of line
-                \s*  #ignore leading white space
-                \\# \s* (?<directive> [a-z0-9_]+ )  #directive name
-                \s* (?<trailer> .*? )  #trailing stuff (non-greedy)
-                \s* ;? \s* $  #ignore trailing delimiter and/or white space`, "xi");
+            const PREPROC_xre = new XRegExp //CAUTION: use "\\" because this is already within a string
+            (`
+                ^ \\s*  #start of line, ignore leading white space
+                \\# \\s* (?<directive> [a-z]+ ) \\s*  #directive name; TODO: allow regex or special chars?
+#                (?<trailer> [^\\s] .*? )? \\s*  #optional trailing stuff (non-greedy)
+                (?<trailer> .+? )? \\s*  #optional trailing stuff; NOTE: non-greedy so white space matches surrounding patterns
+                ;? \\s* ($ | //)  #ignore trailing delimiter and/or white space
+            `, "xi");
 //            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
+//            var {directive, trailer} =
             var parts = this.linebuf.match(PREPROC_xre /* /^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i */);
-if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //NOTE: log() causes inf loop
+if (parts) console.error(`dir '${parts.directive}', trailer '${parts.trailer}'`);
+//            if (parts) parts.trailer = parts.trailer.replace(/^\s+/, ""); //TODO: fix this
+//if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //CAUTION: log() causes inf loop
             this.linebuf = parts? preproc(parts.directive, parts.trailer, this.linenum): macro(this.linebuf); //handle directives vs. expand macros
 //            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
             if (this.linebuf) this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
@@ -175,7 +202,7 @@ if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //NOTE: 
         this.chunks.splice(0, 0, `
             //PREFIX:
             "use strict";
-            const {step/*, include, walkAST*/} = require("./dsl.js");
+            const {/*include, walkAST,*/ step} = require("./dsl.js");
             module.exports = function(){ //wrap all logic so it's included within AST
             ${opts.prefix || ""}
             `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
@@ -280,28 +307,33 @@ function preproc(cmd, linebuf, linenum)
 //            return `console.error(${linebuf}); process.exit(1);`;
             return `throw ${linebuf}`; //leave quotes, parens as is
         case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
-            const INCLUDE_xre = new XRegExp
+            debugger;
+            const INCLUDE_xre = new XRegExp //CAUTION: use "\\" because this is already within a string
             (`
-                ^  #start of line (leading white space was already skipped)
+                ^  #start of string (leading white space should already have been skipped)
                 (
-                    \( \s* " ([^"]+) " \s* \)  #quoted string within "()"
-                  | " ([^"]+) "  #or quoted string
-                  | ([^ ]+)  #or space-delimited string
+                    \\( \\s* ${quostr("paren_filename")} \\s* \\)  #quoted string within "()"
+                  | ${quostr("quo_filename")}  #or quoted string
+                  | (?<bare_filename> [^\\s]+ )  #or space-delimited string
                 )
-                ( \s* ; )?  #optional trailing ";"
-                \s* $  #ignore trailing white space
+                ( \\s* ; )?  #optional trailing ";"
+                \\s* $  #ignore trailing white space
             `, "xi");
+            console.error(INCLUDE_xre.source.replace(/\\/g, " BSL ").pink_lt);
 //            parts = linebuf.match(/^\s*(\(\s*([^"]+)\s*\)|"([^"]+)"|([^ ]+))(\s*;)?\s*$/); //quotes optional if no embedded spaces
             parts = linebuf.match(INCLUDE_xre); //quotes optional if no embedded spaces
-            if (!parts) warn(`invalid include file '${linebuf}' on line ${linenum}`);
-            console.error(`'${linebuf}' => ${JSON5.stringify(parts)}`);
+            if (!parts) warn(`invalid #include file '${linebuf}' on line ${linenum}`);
+//            else parts.filename = parts.filename1 || parts.filename2 || parts.filename3 || "(no file)";
+//            console.error(`'${linebuf}' => pname '${parts.pname}', qname '${parts.qname}', sname '${parts.sname}'`); //${JSON5.stringify(parts)}`);
 //            const [instrm, outstrm] = [infile? fs.createReadStream(infile.slice(1, -1)): process.stdin, process.stdout];
 //console.error(`read file '${parts[2] || parts[3]}' ...`);
 //            var contents = fs.readFileSync(parts[2] || parts[3]); //assumes file is small; contents needed in order to expand nested macros so just use sync read
 //            return contents;
 //wrong            return `include(${str_trim(linebuf)});`; //add outer () if not there (remove + readd)
-            var filename = pathlib.relative(CWD, parts[1]); //pathlib.resolve(filename);
-//            console.error(`include file '${filename}'`);
+            console.error(`include-1 file paren '${parts.paren_filename}', quo '${parts.quo_filename}', bare '${parts.bare_filename}'`);
+            var filename = parts.paren_filename || parts.quo_filename || `"${parts.bare_filename || "nofile"}"`;
+            var filename = /*parts.expr? eval(parts.expr):*/ pathlib.resolve(CWD, eval(filename)); //pathlib.resolve(filename);
+            console.error(`include-2 file '${filename}'`);
 //            console.log(fs.readFileSync(filename)); //TODO: stream?
 //    fs.createReadStream(opts.filename);
             return fs.readFileSync(filename); //TODO: stream?
@@ -975,6 +1007,26 @@ function str_trim(str) //trim quotes and trailing semi-colon; NOTE: assumes only
 }
 
 
+//regexp fragment for quoted string:
+//handles embedded escaped quotes
+//based on https://www.metaltoad.com/blog/regex-quoted-string-escapable-quotes
+function quostr(name)
+{
+    if (isNaN(++quostr.count)) quostr.count = 1; //use unique name each time
+//CAUTION: use "\\" because this is already within a string
+    return `
+        \\s*  #skip leading white space
+        (?<quotype${quostr.count}> ['"] )  #capture opening quote type; if it could be escaped, instead use  ((?<![\\])['"])
+        (${name? `?<${name}>`: ""}  #start named string capture (optional)
+#            [^\\k<quotype${quostr.count}>]+
+            (?: . (?! (?<! [\\] ) \\k<quotype${quostr.count}>) )  #exclude escaped quotes; use negative lookahead because it's not a char class
+            *.?  #capture anything up until same quote used at start
+        )
+        \\k<quotype${quostr.count}>  #trailing quote same as leading quote
+        `).replace(CommentsNewlines_re, ""); //strip comments + newlines in case caller comments out parent line; //.replace(/\\/g, "\\\\"); //NO-re-esc for inclusion into parent string
+}
+
+
 //function is_shebang(chunk)
 //{
 //    return (this.linenum == 1) && chunk.match(/^\s*#\s*!/);
@@ -999,8 +1051,9 @@ function extensions()
     }
 //XRegExp is interchangeable with RE, so make the API interchangeable as well:
 //    console.log(String.prototype.match.toString());
-    String.prototype.sv_match = String.prototype.match;
-    String.prototype.match = function(re) { return (typeof re == "XRegExp")? XRegExp.exec(this, re): this.sv_match(re); }
+//    String.prototype.sv_match = String.prototype.match;
+//NOTE: XRegExp.exec works with non-XRegExp RE also
+    String.prototype.match = function(re) { return XRegExp.exec(this, re); }; //console.error("is xregexp? " + XRegExp.isRegExp(re)); return XRegExp.exec(this, re); } //XRegExp.isRegExp(re)? XRegExp.exec(this.toString(), re): this.sv_match(re); }
 //    console.log(String.prototype.match.toString());
 }
 
