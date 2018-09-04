@@ -1,4 +1,4 @@
-#!./pic8-dsl.js -debug -Xrun -echo -Xast -Xno_reduce -Xno_codegen  #comment out this line for use with .load in Node.js REPL
+#!./pic8-dsl.js +debug +preproc +echo -ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
 //NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
 //"use strict";
@@ -6,21 +6,41 @@
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 console.log("opts: " + JSON5.stringify(opts));
 
-//#include "pic16f1827.h"
-const TRISA_ADDR = 0x91, PORTA_ADDR = 0x11;
-function reg8(addr) { return {addr, }; }
-var TRISA = reg8(0x91), PORTA = reg8(0x11), TMR1, T1IF;
+#ifdef XYZ
+ #warning `XYZ = '${XYZ}'`
+#else
+ #warning "no XYZ";
+#endif
+#define XYZ  hello
+#ifdef XYZ
+ #warning `XYZ = '${XYZ}'`
+#else
+ #warning "no XYZ";
+#endif
+#undef XYZ
+#ifdef XYZ
+ #warning `XYZ = '${XYZ}'`
+#else
+ #warning "no XYZ";
+#endif
+
+
+#include "pic16f1827.h"
+//const TRISA_ADDR = 0x91, PORTA_ADDR = 0x11;
+//function reg8(addr) { return {addr, }; }
+//var TRISA = reg8(0x91), PORTA = reg8(0x11), TMR1, T1IF;
 
 #include("./hello-helper.dsl");
 #include "./hello-helper.dsl";
-#include ./hello-helper.dsl
+//invalid #include ./hello-helper.dsl
 #include "./hello-" + "helper.dsl" ;
 
 console.log("hello " + simple_func(4)); \
     console.log("bye");
 #warning "message"
 #warning ("hi")
-#error `${simple_func(3+4)}`
+//#error `error# ${simple_func(3+4)}`
+#warning `error# ${simple_func(3+4)}`.red_lt
 #warning simple_func(5)
 
 console.log("args: " + JSON.stringify(process.argv, null, "  "));
@@ -30,7 +50,7 @@ console.log("args: " + JSON.stringify(process.argv, null, "  "));
 
 
 //this function called by -run command-line arg:
-function autoexec()
+function run()
 {
 //    console.error("dsl run ...".green_lt);
     var ticker = 
@@ -84,4 +104,5 @@ function* wait_1sec()
     }
 }
 
+#dump_macros //for debug only
 //eof

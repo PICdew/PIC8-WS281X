@@ -1,5 +1,8 @@
 //8-bit extended PIC model:
 
+#ifndef PIC16X_H
+#define PIC16X_H
+
 #include "pic8-hw.h"
 
 
@@ -23,3 +26,5 @@ const PIC = MPU(
     has_PLL: true,
 });
 
+#endif //ndef PIC16X_H
+//eof

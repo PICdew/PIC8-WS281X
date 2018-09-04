@@ -1,4 +1,8 @@
-//define PIC h/w model (reg defs, etc)
+//define PIC h/w model (reg defs, banks/pages, etc)
+
+#ifndef PIC8_HW_H
+#define PIC8_HW_H
+
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
@@ -6,7 +10,7 @@
 //
 
 //overall device (memory + clock):
-//use function-stlye ctors to allow call without "new":
+//use function-stlye ctors to allow call without "new" (allows parent to be passed in)
 function MPU(opts)
 {
     if (!(this instanceof MPU)) return new MPU(opts);
@@ -48,10 +52,12 @@ function MPU(opts)
 //registers:
 const Reg =
 MPU.prototype.Reg =
-function Reg(opts)
+function Reg(opts, parent)
 {
-    if (!(this instanceof Reg)) return new Reg(opts);
-    this.opts = opts || {};
+    if (!(this instanceof Reg)) return new Reg(opts, parent || this);
+//    this.opts = opts || {};
+    if (!(parent instanceof MPU)) throw "Reg must have MPU parent".red_lt;
+    this.opts = Object.assign({parent}, opts || {}); //shallow copy
 //incorporate memory allocator directly into h/w model:
 //this allows more efficient code gen later
     if (this.opts.addr) return; //memory already allocated
@@ -63,10 +69,17 @@ function Reg(opts)
 }
 
 //sub-registers:
-Register.prototype.BitOf = function(bits)
+const Bit =
+Reg.prototype.Bit = 
+function Bit(opts, parent)
 {
-    throw "TODO check bit in reg".red_lt;
-    return new Register(Object.assign({}, this.opts, {bits}));
+//    throw "TODO check bit in reg".red_lt;
+//    return new Register(Object.assign({}, this.opts, {bits}));
+    if (!(this instanceof Bit)) return new Bit(opts, parent || this);
+//    this.opts = opts || {};
+    if (!(parent instanceof Reg)) throw "Bit must have Reg parent".red_lt;
+    if (!isNaN(opts)) opts = {bits: opts};
+    this.opts = Object.assign({parent}, opts || {}); //shallow copy
 }
 /* BROKEN
 //https://github.com/devongovett/to-ast
@@ -83,4 +96,5 @@ Register.prototype.toAST = function()
 }
 */
 
+#endif //ndef PIC8_HW_H
 //eof

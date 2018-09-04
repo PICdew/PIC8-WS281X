@@ -8,4 +8,4 @@ function helper(x)
 }
 
 console.log("... hello helper");
-//eof hello-helper.dsl
+//eof
