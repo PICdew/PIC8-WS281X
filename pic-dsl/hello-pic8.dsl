@@ -1,4 +1,4 @@
-#!./pic8-dsl.js +debug +preproc +echo -ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
+#!./pic8-dsl.js +debug +preproc +echo +ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
 //NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
 //"use strict";

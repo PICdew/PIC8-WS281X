@@ -536,9 +536,9 @@ function include(filename)
 /// Echo input stream to stderr (for debug):
 //
 
-const echo =
-module.exports.echo =
-function echo(opts)
+const echo_stream =
+module.exports.echo_stream =
+function echo_stream(opts)
 {
     return thru2(/*{objectMode: false},*/ xform, flush);
 
@@ -573,8 +573,8 @@ module.exports.dsl2ast =
 function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
 {
 //    if (!opts) opts = {};
-    global.JSON5 = JSON5; //make accessible to child modules
-    global.opts = opts || {}; //make command line args accessible to child (dsl) module
+//    global.JSON5 = JSON5; //make accessible to child modules
+//    global.opts = opts || {}; //make command line args accessible to child (dsl) module
 //TODO: define custom ops
 //    const instrm = new Readable();
 //    const outstrm = //new Writable();
@@ -646,54 +646,10 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
     function xform(chunk, enc, cb)
     {
         if (!this.chunks) this.chunks = [];
-        if (isNaN(++this.numlines)) this.numlines = 1;
+//        if (isNaN(++this.numlines)) this.numlines = 1;
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
         if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
-        if (chunk.length)
-        {
-//            if (this.chunks.last.slice(-1) == "\\") this.chunks.last = this.chunks.last.
-//            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.chunks.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
-            if (!this.linebuf) this.linenum = this.numlines; //starting new line; remember line#
-            if (chunk.slice(-1) == "\\") //line continuation (mainly for macros)
-            {
-                if (chunk.indexOf("//") != -1) warn(`single-line comment on ${this.numlines} interferes with line continuation from ${this.linenum}`);
-                this.linebuf = (this.linebuf || "") + chunk.slice(0, -1);
-//                this.push(chunk.slice(0, -1)); //drop backslash and don't send newline
-                cb();
-                return;
-            }
-            this.linebuf = (this.linebuf || "") + chunk;
-//            this.linenum = this.numlines;
-//            prepend.call(this);
-//            this.push(chunk + ` //line ${this.linenum}\n`); //add line delimiter (and line# for debug)
-//            this.push(chunk + `; "line ${this.linenum}";\n`); //add line delimiter (and line# for debug)
-//            this.push(chunk + "\n"); //NO- add line delimiter (and line# for debug)
-        }
-        if (this.linebuf) //process or flush
-        {
-//    `(?<year>  [0-9]{4} ) -?  # year
-//     (?<month> [0-9]{2} ) -?  # month
-//     (?<day>   [0-9]{2} )     # day`, 'x');
-            const PREPROC_xre = new XRegExp //CAUTION: use "\\" because this is already within a string
-            (`
-                ^ \\s*  #start of line, ignore leading white space
-                \\# \\s* (?<directive> [a-z]+ ) \\s*  #directive name; TODO: allow regex or special chars?
-#                (?<details> [^\\s] .*? )? \\s*  #optional trailing stuff (non-greedy)
-                (?<details> .+? )? \\s*  #optional trailing stuff; NOTE: non-greedy so white space matches surrounding patterns
-                ;? \\s* ($ | //)  #ignore trailing delimiter and/or white space or comment
-            `, "xi");
-//            var parts = this.linebuf.match(/^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i);
-//            var {directive, details} =
-            var parts = this.linebuf.match(PREPROC_xre /* /^\s*#\s*([a-z0-9_]+)\s*(.*)\s*$/i */);
-if (parts) console.error(`dir '${parts.directive}', details '${parts.details}', on line ${this.linenum}`);
-//            if (parts) parts.details = parts.details.replace(/^\s+/, ""); //TODO: fix this
-//if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //CAUTION: log() causes inf loop
-            this.linebuf = parts? preproc(parts.directive, parts.details, this.linenum): macro(this.linebuf); //handle directives vs. expand macros
-//            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
-            if (this.linebuf) this.chunks.push(`${this.linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
-    //            this.push(chunk);
-            this.linebuf = null;
-        }
+        if (chunk.length) this.chunks.push(chunk); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
         cb();
     }
 
@@ -703,26 +659,21 @@ if (parts) console.error(`dir '${parts.directive}', details '${parts.details}', 
 //        append.call(this);
 //        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
         if (!this.chunks) this.chunks = [];
-        if (this.linebuf)
-        {
-            warn(`line continuation at end of file ${this.linenum}`);
-            this.chunks.push(this.linebuf + "\\"); //flush last partial line, don't expand macros since it was incomplete
-        }
 //prepend/append wrapper code:
         this.chunks.splice(0, 0, `
             //PREFIX:
             "use strict";
-            const {/*include, walkAST,*/ step} = require("./dsl.js");
+            const {/*include, walkAST,*/ step} = require("${__filename}");
             module.exports = function(){ //wrap all logic so it's included within AST
             ${opts.prefix || ""}
-            `.replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
+            `.unindent); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
         this.chunks.push(`
             //SUFFIX:
 //            if (typeof run == "function") run();
             ${opts.suffix || ""}
             ${!opts.run? "//": ""}run();
             } //end of wrapper
-            `.replace(/^\s+/gm, ""));
+            `.unindent); //replace(/^\s+/gm, ""));
 //compile and get AST:
 //        console.error(`${this.chunks.length} chunks at flush`);
         if (opts.echo) console.error(this.chunks.join("\n").cyan_lt); //show source code input
@@ -749,8 +700,8 @@ if (parts) console.error(`dir '${parts.directive}', details '${parts.details}', 
 //            this.funcs = {};
 //            this.consts = {};
 //cb(); return;
-        const ast = !opts.no_reduce? reduce(ast_raw): ast_raw;
-        if (opts.ast && !opts.no_reduce)
+        const ast = opts.reduce? reduce(ast_raw): ast_raw;
+        if (opts.ast && opts.reduce)
         {
             if (opts.debug) console.error(`${numkeys(ast.context)} consts during reduce: ${Object.keys(ast.context || {}).join(", ")}`.blue_lt);
             console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST
@@ -1760,7 +1711,7 @@ function CLI(more_opts)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
         .pipe(opts.preproc? preproc(opts): new PassThrough())
-        .pipe(opts.echo? echo(opts): new PassThrough())
+        .pipe(opts.echo? echo_stream(opts): new PassThrough())
 //        .pipe(ReplStream(opts))
         .pipe(opts.ast? dsl2ast(opts): new PassThrough()) //Object.assign(opts, more_opts || {})))
 //        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
