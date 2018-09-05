@@ -15,11 +15,20 @@ const {LineStream} = require('byline');
 const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
 const Duplex = DuplexStream; //TODO: API is different
 const {/*Readable, Writable, Duplex,*/ PassThrough} = require("stream");
+const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 
 extensions();
 module.exports.version = "1.0";
 const CWD = ""; //param for pathlib.resolve()
 
+//var ary = [];
+//ary.push("line 1".red_lt);
+//ary.push("line 2");
+//ary.push("line 3".green_lt);
+//console.error("test 1", ary.join("\n"));
+//console.error("test 2", ary.join("\n").cyan_lt);
+//console.error("test 3", ary.join("\n").cyan_lt.color_reset);
+//process.exit(0);
 
 //https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative
 //use negative lookahead instead:   (?<!filename)\.js$   ==>  (?!.*filename\.js$).*\.js$
@@ -52,6 +61,43 @@ console.error("match2?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#
 //console.log(`match yr ${result.year}, mon ${result.month}, day ${result.day}, result ${JSON5.stringify(result)}`.blue_lt);
 //console.log(`re ${JSON5.stringify(re_test)}`.blue_lt);
 //process.exit(0);
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
+/// Echo input stream to stderr (for debug):
+//
+
+const echo_stream =
+module.exports.echo_stream =
+function echo_stream(opts)
+{
+    var destfile = opts.filename.unquoted || opts.filename;
+console.error(typeof destfile, destfile, opts.filename);
+    destfile = destfile && pathlib.basename(destfile, pathlib.extname(destfile));
+    const echostrm = opts.pass && fs.createWriteStream(`${destfile || "stdin"}-${opts.pass}.out`);
+    return Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
+//    const instrm = new PassThrough(); //wrapper end-point
+//    const outstrm = instrm
+//        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
+//        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
+//    return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+
+    function xform(chunk, enc, cb)
+    {
+        if (isNaN(++this.numlines)) this.numlines = 1;
+        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
+        if (echostrm) echostrm.write(chunk + "\n");
+        else
+//        {
+//            if (this.numlines == 1) console.error("preproc out:");
+            /*if (opts.echo)*/ console.error(chunk/*.replace(/\n/gm, "\\n")*/.cyan_lt); //this.chunks.join("\n").cyan_lt); //echo to stderr so it doesn't interfere with stdout; drop newlines because console.error will send one anyway
+//        }
+        this.pushline(chunk);
+        cb();
+    }
+    function flush(cb) { cb(); }
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -108,7 +154,8 @@ function preproc(opts) //{filename, replacements, prefix, suffix, echo, debug, r
     const instrm = new PassThrough(); //end-point wrapper
     const outstrm = instrm
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
-        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts})); //attach opts to stream for easier access across scope
+        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, /*pushline,*/})) //attach opts to stream for easier access across scope
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "preproc"}, opts)): new PassThrough());
 //    const retval =
     return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 //    CaptureConsole.startCapture(process.stdout, (outbuf) => { xform.call(retval, "//stdout: " + outbuf, "utf8", function(){}); --retval.numlines; }); //send all stdout downstream thru pipeline
@@ -132,7 +179,7 @@ function preproc_xform(chunk, enc, cb)
         \\s*  #ignore white space
         !
         `, "x"); //NOTE: real shebang doesn't allow white space
-    if (!opts.shebang && (this.numlines == 1) && chunk.match(SHEBANG_xre)) { this/*.chunks*/.push(`//${chunk} //${chunk.length}:line ${this.numlines} ${opts.filename || "stdin"}`.blue_lt); cb(); return; } //skip shebang; must occur before prepend()
+    if (!opts.shebang && (this.numlines == 1) && chunk.match(SHEBANG_xre)) { this/*.chunks*/.push/*line*/(`//${chunk} //${chunk.length}:line ${this.numlines} ${opts.filename || "stdin"}`.blue_lt); cb(); return; } //skip shebang; must occur before prepend()
 //        procline.call(this, chunk, cb);
     if (chunk.length)
     {
@@ -215,10 +262,10 @@ function preproc_xform(chunk, enc, cb)
         if ((processed || {}).pipe) //stream object (from #include)
         {
 //                const THAT = this;
-            this.push(`//start '${processed.filename}' ...`.green_lt);
+            this.push/*line*/(`//start '${processed.filename}' ...`.green_lt);
             processed
                 .pipe(preproc(Object.assign({}, opts, {filename: processed.filename.quoted1, bypass_startlen: opts.bypass.length})))
-                .on("data", (buf) => { this.push(buf); }) //write to parent
+                .on("data", (buf) => { this.push/*line*/(buf); }) //write to parent
                 .on("end", () => { eof.call(this); })
                 .on("error", (err) => { eof.call(this, err); });
             return; //NOTE: don't call cb() until nested file eof
@@ -227,7 +274,8 @@ function preproc_xform(chunk, enc, cb)
         {
             processed = `${processed} //${processed.length}:line ${this.srcline}`; //+ "\n"); //chunk); //re-add newline to compensate for LineStream
             if (/*opts.bypass.last*/ old_bypass) processed = `//${processed}`.gray_dk;
-            this.push(processed);
+//if (this.numlines < 4) console.error(processed.replace(/\n/gm, "\\n"));
+            this.push/*line*/(processed);
         }
     }
     cb();
@@ -244,7 +292,7 @@ function preproc_xform(chunk, enc, cb)
     {
         if (err) error(`${processed.filename} read error on line ${this.srcline}: ${exc}`);
 //        this.push(`//err ... resume line ${this.numlines} ${processed.filename || "stdin"}`.red_lt);
-        this.push(`//${err? "err": "eof"} ... resume line ${this.numlines} ${opts.filename || "stdin"}`.red_lt);
+        this.push/*line*/(`//${err? "err": "eof"} ... resume line ${this.numlines} ${opts.filename || "stdin"}`.red_lt);
 //        if ((opts.bypass || []).length) error(`unterminated #if on line ${this.srcline}`);
         cb();
     }
@@ -263,7 +311,7 @@ function preproc_flush(cb)
         warn(`dangling line continuation on line ${this.srcline}`);
 //            this.chunks.push(this.linebuf + "\\"); //flush last partial line, don't expand macros since it was incomplete
 //            this.linebuf += "\\"; //flush last partial line, don't expand macros since it was incomplete
-        this.push(`${opts.bypass.last? "//": ""}${this.linebuf}\\`); //flush last partial line, don't expand macros since last line was incomplete
+        this.push/*line*/(`${opts.bypass.last? "//": ""}${this.linebuf}\\`); //flush last partial line, don't expand macros since last line was incomplete
     }
 //    if (opts.dump_macros && isNaN(opts.bypass_startlen)) //dump macros at top-most level only
 //        const stack = {symtab: {}};
@@ -533,44 +581,90 @@ function include(filename)
 
 ////////////////////////////////////////////////////////////////////////////////
 ////
-/// Echo input stream to stderr (for debug):
-//
-
-const echo_stream =
-module.exports.echo_stream =
-function echo_stream(opts)
-{
-    return thru2(/*{objectMode: false},*/ xform, flush);
-
-    function xform(chunk, enc, cb)
-    {
-        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-        /*if (opts.echo)*/ console.error(chunk.cyan_lt); //this.chunks.join("\n").cyan_lt); //echo to stderr so it doesn't interfere with stdout
-        this.push(chunk);
-        cb();
-    }
-    function flush(cb) { cb(); }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-////
 /// Transform DSL source code to Javascript (stream):
 //
 
 //const {LineStream} = require('byline');
 //const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
 //const {/*Readable, Writable,*/ PassThrough} = require("stream");
-const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+//const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+//const RequireFromString = require('require-from-string');
+//const CaptureConsole = require("capture-console");
+//const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
+//const REPL = require("repl"); //https://nodejs.org/api/repl.html
+
+
+const dsl2js =
+module.exports.dsl2js =
+function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
+{
+    const instrm = new PassThrough(); //end-point wrapper
+    const outstrm = instrm
+        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
+//        .pipe(preproc())
+        .pipe(Object.assign(thru2(/*{objectMode: false},*/ xform, flush)), {wrapper}) //syntax fixups
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "dsl2js"}, opts)): new PassThrough());
+    return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
+
+    function xform(chunk, enc, cb)
+    {
+//        if (!this.chunks) this.chunks = [];
+//        if (isNaN(++this.numlines)) this.numlines = 1;
+        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
+//        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
+        this.wrapper();
+        if (chunk.length) this.push(chunk); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
+        cb();
+    }
+
+    function flush(cb)
+    {
+        this.wrapper();
+//append wrapper code:
+        this.push(`
+            //SUFFIX:
+//            if (typeof run == "function") run();
+            ${opts.suffix || ""}
+            ${!opts.run? "//": ""}run();
+            } //end of wrapper+suffix
+            `.unindent); //replace(/^\s+/gm, ""));
+        cb();
+    }
+
+//prepend wrapper code (1x only):
+    function wrapper()
+    {
+        this.push(`
+            //PREFIX:
+            "use strict";
+            const {/*include, walkAST,*/ step} = require("${__filename}");
+            module.exports = function(){ //wrap all logic so it's included within AST
+            ${opts.prefix || ""}
+            //end prefix
+            `.unindent); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
+        this.wrapper = function() {}; //only need to do this 1x
+    }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+////
+/// Transform JS source code to AST (emit events):
+//
+
+//const {LineStream} = require('byline');
+//const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
+//const {/*Readable, Writable,*/ PassThrough} = require("stream");
+//const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 const RequireFromString = require('require-from-string');
 const CaptureConsole = require("capture-console");
 const toAST = require("to-ast"); //https://github.com/devongovett/to-ast
 //const REPL = require("repl"); //https://nodejs.org/api/repl.html
 
 
-const dsl2ast =
-module.exports.dsl2ast =
-function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
+const js2ast =
+module.exports.js2ast =
+function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, run, ast, shebang}
 {
 //    if (!opts) opts = {};
 //    global.JSON5 = JSON5; //make accessible to child modules
@@ -587,7 +681,7 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //    return new DuplexStream(outstrm, instrm); //return endpts; CAUTION: swap in + out
 //    instrm.pipe = function(strm) { return outstrm.pipe(strm); };
 //    return instrm;
-    const instrm = new PassThrough(); //wrapper end-point
+    const instrm = new PassThrough(); //end-point wrapper
 //    const instrm = new LineStream({keepEmptyLines: true}); //preserve line#s (for easier debug)
 //    if (opts.debug)
 //    {
@@ -598,7 +692,8 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
     const outstrm = instrm
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
-        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
+        .pipe(thru2(/*{objectMode: false},*/ xform, flush)) //collect and compile code
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "js2ast"}, opts)): new PassThrough());
 /*NOTE: REPL doesn't really add any value - can load module from source code instead
     if ("run" in opts) //execute logic
     {
@@ -659,25 +754,10 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //        append.call(this);
 //        if (opts.run) this.push(`const ast = require("${process.argv[1]}").walkAST(${opts.run});\n`);
         if (!this.chunks) this.chunks = [];
-//prepend/append wrapper code:
-        this.chunks.splice(0, 0, `
-            //PREFIX:
-            "use strict";
-            const {/*include, walkAST,*/ step} = require("${__filename}");
-            module.exports = function(){ //wrap all logic so it's included within AST
-            ${opts.prefix || ""}
-            `.unindent); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
-        this.chunks.push(`
-            //SUFFIX:
-//            if (typeof run == "function") run();
-            ${opts.suffix || ""}
-            ${!opts.run? "//": ""}run();
-            } //end of wrapper
-            `.unindent); //replace(/^\s+/gm, ""));
 //compile and get AST:
 //        console.error(`${this.chunks.length} chunks at flush`);
-        if (opts.echo) console.error(this.chunks.join("\n").cyan_lt); //show source code input
-        const module = RequireFromString(this.chunks.join("\n"));
+//        if (opts.echo) console.error(`js dsl ${this.chunks.length} in:`, this.chunks.join("\n").cyan_lt.color_reset); //show source code input
+        const module = RequireFromString(this.chunks.join("\n").nocolors);
         if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
 //            this.push(JSON.stringify(compiled, null, "  ") + "\n");
 //            this.push(Object.keys(compiled).join(", ") + "\n");
@@ -737,6 +817,7 @@ function dsl2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 
 
 //single-step thru generator function (for sim/debug):
+const step =
 module.exports.step =
 function step(gen)
 {
@@ -749,10 +830,7 @@ function step(gen)
 //for (;;) { if (gen.next().done) break; }
 
 
-////////////////////////////////////////////////////////////////////////////////
-////
-/// AST helpers:
-//
+//AST helpers:
 
 //allow func calls to be distinguished from vars:
 //NOTE: both must be falsey
@@ -1430,6 +1508,22 @@ function unindent(str)
 }
 
 
+//strip colors from string:
+function nocolors(str)
+{
+    const ANYCOLOR_xre = XRegExp(`
+        \\x1B  #ASCII Escape char
+        \\[
+        (
+            (?<code>  \\d ; \\d+ )  #begin color
+          | 0  #or end color
+        )
+        m  #terminator
+        `, "xg");
+    return (str || "").replace(ANYCOLOR_xre, "");
+}
+
+
 //reset color whenever it goes back to default:
 function color_reset(str, color)
 {
@@ -1558,6 +1652,12 @@ function ary2dict(ary)
 function nop(arg) { return arg; }
 
 
+function pushline(str)
+{
+    this.push(str);
+    this.push("\n");
+}
+
 //safely evaluate a string expr:
 //for warnings about eval(), see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
 //function safe_eval(expr, params)
@@ -1606,6 +1706,7 @@ function extensions()
         anchorRE: { get() { return anchorRE(this/*.toString()*/); }, },
         spaceRE: { get() { return spaceRE(this/*.toString()*/); }, },
         color_reset: { get() { return color_reset(this/*.toString()*/); }, },
+        nocolors: { get() { return nocolors(this/*.toString()*/); }, },
 //        echo_stderr: { get() { console.error("echo_stderr:", this.toString()); return this; }, },
     });
 //unit tests:
@@ -1710,10 +1811,12 @@ function CLI(more_opts)
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "input"}, opts)): new PassThrough())
         .pipe(opts.preproc? preproc(opts): new PassThrough())
-        .pipe(opts.echo? echo_stream(opts): new PassThrough())
+//        .pipe(opts.echo? echo_stream(opts): new PassThrough())
 //        .pipe(ReplStream(opts))
-        .pipe(opts.ast? dsl2ast(opts): new PassThrough()) //Object.assign(opts, more_opts || {})))
+        .pipe(dsl2js(opts)) //Object.assign(opts, more_opts || {})))
+        .pipe(opts.ast? js2ast(opts): new PassThrough()) //Object.assign(opts, more_opts || {})))
 //        .pipe(!opts.src? dsl2js(opts): new PassThrough()) //{filename, debug: true})) //, run: "main"}))
 //        .pipe((!opts.src && !opts.codegen)? js2ast(opts): new PassThrough())
 //        .pipe(asm_optimize())
