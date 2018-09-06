@@ -4,24 +4,25 @@
 //"use strict";
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
+const JSON5 = require("json5");
 console.log("opts: " + JSON5.stringify(opts));
 
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`
 #else
- #warning "no XYZ";
+ #warning "no XYZ"
 #endif
 #define XYZ  hello
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`
 #else
- #warning "no XYZ";
+ #warning "no XYZ"
 #endif
 #undef XYZ
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`
 #else
- #warning "no XYZ";
+ #warning "no XYZ"
 #endif
 
 

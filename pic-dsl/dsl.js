@@ -73,9 +73,9 @@ module.exports.echo_stream =
 function echo_stream(opts)
 {
     var destfile = opts.filename.unquoted || opts.filename;
-console.error(typeof destfile, destfile, opts.filename);
+//console.error(typeof destfile, destfile, opts.filename);
     destfile = destfile && pathlib.basename(destfile, pathlib.extname(destfile));
-    const echostrm = opts.pass && fs.createWriteStream(`${destfile || "stdin"}-${opts.pass}.out`);
+    const echostrm = opts.pass && fs.createWriteStream(`${destfile || "stdin"}-${opts.pass}`);
     return Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
 //    const instrm = new PassThrough(); //wrapper end-point
 //    const outstrm = instrm
@@ -153,9 +153,9 @@ function preproc(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 //console.error(`is context now? ${vm.isContext(opts.macros)} @${__line}`);
     const instrm = new PassThrough(); //end-point wrapper
     const outstrm = instrm
+        .pipe((opts.echo && !opts.nested)? echo_stream(Object.assign({pass: "preproc-in.txt"}, opts)): new PassThrough()) //echo top-level only
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
-        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, /*pushline,*/})) //attach opts to stream for easier access across scope
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "preproc"}, opts)): new PassThrough());
+        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, /*pushline,*/})); //attach opts to stream for easier access across scope
 //    const retval =
     return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 //    CaptureConsole.startCapture(process.stdout, (outbuf) => { xform.call(retval, "//stdout: " + outbuf, "utf8", function(){}); --retval.numlines; }); //send all stdout downstream thru pipeline
@@ -167,6 +167,7 @@ function preproc(opts) //{filename, replacements, prefix, suffix, echo, debug, r
 function preproc_xform(chunk, enc, cb)
 {
     const opts = this.opts;
+    opts.preprocessed = true;
 //        if (!this.chunks) this.chunks = [];
     if (isNaN(++this.numlines)) this.numlines = 1;
 //if (this.numlines == 1) console.error(`xform ctor ${this.constructor.name}, tag ${this.djtag}`);
@@ -225,7 +226,7 @@ function preproc_xform(chunk, enc, cb)
 //if (parts) console.error(this.numlines + " " + JSON5.stringify(parts)); //CAUTION: log() causes inf loop
 //            if (!parts) return out(macro(this.linebuf)); //expand macros
         var old_bypass = opts.bypass.last; //use pre-line bypass state when displaying line
-        var processed = parts? (directive.call(this, parts.directive, parts.details) || this.linebuf): !opts.bypass.last? macro.call(this, this.linebuf): this.linebuf; //handle directives vs. expand macros
+        var processed = parts? (directive.call(this, parts.directive, parts.details) || this.linebuf): !opts.bypass.last? expand_macros.call(this, this.linebuf): this.linebuf; //handle directives vs. expand macros
         this.linebuf = null; //CAUTION: must clear before starting nested stream to avoid reentry problems
 //            linebuf = directive(parts.directive, parts.details, this.linenum, this.push, cb); //handle directives vs. expand macros
 //            if (parts) { warn(`TODO: #${parts[1]} on line ${this.linenum}`); this.linebuf = "//" + this.linebuf; }
@@ -264,8 +265,8 @@ function preproc_xform(chunk, enc, cb)
 //                const THAT = this;
             this.push/*line*/(`//start '${processed.filename}' ...`.green_lt);
             processed
-                .pipe(preproc(Object.assign({}, opts, {filename: processed.filename.quoted1, bypass_startlen: opts.bypass.length})))
-                .on("data", (buf) => { this.push/*line*/(buf); }) //write to parent
+                .pipe(preproc(Object.assign({}, opts, {filename: processed.filename.quoted1, bypass_startlen: opts.bypass.length, nested: true})))
+                .on("data", (buf) => { this.push/*line*/(`${buf}`.blue_lt.color_reset); }) //write to parent
                 .on("end", () => { eof.call(this); })
                 .on("error", (err) => { eof.call(this, err); });
             return; //NOTE: don't call cb() until nested file eof
@@ -275,7 +276,7 @@ function preproc_xform(chunk, enc, cb)
             processed = `${processed} //${processed.length}:line ${this.srcline}`; //+ "\n"); //chunk); //re-add newline to compensate for LineStream
             if (/*opts.bypass.last*/ old_bypass) processed = `//${processed}`.gray_dk;
 //if (this.numlines < 4) console.error(processed.replace(/\n/gm, "\\n"));
-            this.push/*line*/(processed);
+            this.push/*line*/(`${processed}`.cyan_lt.color_reset);
         }
     }
     cb();
@@ -311,8 +312,11 @@ function preproc_flush(cb)
         warn(`dangling line continuation on line ${this.srcline}`);
 //            this.chunks.push(this.linebuf + "\\"); //flush last partial line, don't expand macros since it was incomplete
 //            this.linebuf += "\\"; //flush last partial line, don't expand macros since it was incomplete
-        this.push/*line*/(`${opts.bypass.last? "//": ""}${this.linebuf}\\`); //flush last partial line, don't expand macros since last line was incomplete
-    }
+//        this.push/*line*/(`${opts.bypass.last? "//": ""}${this.linebuf}\\`); //flush last partial line, don't expand macros since last line was incomplete
+        var processed = `${this.linebuf}\\`.cyan_lt;
+        if (opts.bypass.last) processed = `//${processed}`.gray_dk;
+        this.push/*line*/(processed.cyan_lt.color_reset); //flush last partial line, don't expand macros since last line was incomplete
+}
 //    if (opts.dump_macros && isNaN(opts.bypass_startlen)) //dump macros at top-most level only
 //        const stack = {symtab: {}};
 //        stack.new_frame = function()
@@ -323,24 +327,6 @@ function preproc_flush(cb)
 //        out(this.linebuf);
 }
 
-
-//expand macros:
-//const MACRO_NAME = "\w+"; //word chars: [a-z0-9_] //TODO: allow $ or @ in name?; allow regex pattern in place of name?
-function macro(linebuf)
-{
-//keep expanding while there is more to do:
-/*
-    while (Object.keys(macro.defs || {}).some((macro_name) =>
-    {
-        if (linebuf.match)
-//            if (macro.defs[m].arglist !== null) //with arg list
-//                linebuf.replace()
-//also: "#str" and "token ## token"
-        return false;
-    }));
-*/
-    return linebuf;
-}
 
 //preprocessor directives:
 function directive(cmd, linebuf) //, linenum)
@@ -495,6 +481,27 @@ function directive(cmd, linebuf) //, linenum)
 //collect all macros in one place:
 module.exports.macros = {};
 
+//expand macros:
+//const MACRO_NAME = "\w+"; //word chars: [a-z0-9_] //TODO: allow $ or @ in name?; allow regex pattern in place of name?
+function expand_macros(linebuf)
+{
+    const macros = module.exports.macros;
+//keep expanding until nothing found:
+    while (Object.keys(macros /*|| {}*/).some((name) =>
+    {
+        var svline = linebuf;
+        linebuf = linebuf.replace(macros[name].re, macros[name].body || "");
+//TODO: "#str" and "token ## token"
+//TODO: param list
+        return (linebuf != svline);
+//        if (linebuf.match)
+//            if (macro.defs[m].arglist !== null) //with arg list
+//                linebuf.replace()
+    }));
+    return linebuf;
+}
+
+
 //shim for #if eval:
 //exported for simpler access by vm
 const defined =
@@ -543,7 +550,19 @@ function define(linebuf, where)
     var parts = linebuf.match(DEFINE_xre);
     if (!parts) return warn(`ignoring invalid macro definition '${linebuf}' on line ${where}`);
     if (macros[parts.name]) return warn(`ignoring duplicate macro '${parts.name}' definition on ${where}, previous was on ${macros[parts.name].srcline}`);
-    macros[parts.name] = {/*pattern: new Regexp("[^a-z0-9_]" + parts[1],*/ arglist: parts.params, body: parts.body, srcline: where};
+    macros[parts.name] =
+    {
+        re: new XRegExp(`
+            \\b  #word boundary or start of string
+            ${parts.name}  #macro name
+            ${parts.params? `(${parts.params})`: ""}  #param list (optional)
+            \\b  #word boundary or end of string
+            `, "xg"),
+//        re_string: 
+        arglist: parts.params? parts.params.split(","): null,
+        body: parts.body,
+        srcline: where,
+    };
 //console.error(`define: ${parts.name || "NO-NAME"} (${parts.params || "NO-PARAMS"}) ${parts.body || "NO-BODY"} @${where}`);
 //console.error(`defined now? ${!!macros[parts.name]} @${srcline()}`);
     return parts.name;
@@ -600,10 +619,11 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 {
     const instrm = new PassThrough(); //end-point wrapper
     const outstrm = instrm
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "dsl2js-in.txt"}, opts)): new PassThrough())
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
-        .pipe(Object.assign(thru2(/*{objectMode: false},*/ xform, flush)), {wrapper}) //syntax fixups
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "dsl2js"}, opts)): new PassThrough());
+        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
+//        .pipe(Object.assign(thru2(/*{objectMode: false},*/ xform, flush)), {wrapper}) //syntax fixups
     return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 
     function xform(chunk, enc, cb)
@@ -612,28 +632,29 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //        if (isNaN(++this.numlines)) this.numlines = 1;
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
-        this.wrapper();
-        if (chunk.length) this.push(chunk); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
+        leader.call(this); //this.wrapper();
+        if (chunk.length) this.push(chunk); //.nocolors); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
         cb();
     }
 
     function flush(cb)
     {
-        this.wrapper();
-//append wrapper code:
+        leader.call(this); //this.wrapper();
+//append trailer code:
         this.push(`
             //SUFFIX:
 //            if (typeof run == "function") run();
             ${opts.suffix || ""}
             ${!opts.run? "//": ""}run();
             } //end of wrapper+suffix
-            `.unindent); //replace(/^\s+/gm, ""));
+            `.unindent.blue_lt); //replace(/^\s+/gm, ""));
         cb();
     }
 
-//prepend wrapper code (1x only):
-    function wrapper()
+//prepend leader code (1x only):
+    function leader()
     {
+        if (this.has_leader) return;
         this.push(`
             //PREFIX:
             "use strict";
@@ -641,8 +662,9 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
             module.exports = function(){ //wrap all logic so it's included within AST
             ${opts.prefix || ""}
             //end prefix
-            `.unindent); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
-        this.wrapper = function() {}; //only need to do this 1x
+            `.unindent.blue_lt); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
+//        this.wrapper = function() {}; //only need to do this 1x
+        this.has_leader = true; //1x only
     }
 }
 
@@ -690,10 +712,10 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
 //    }
     const outstrm = instrm
+        .pipe(opts.echo? echo_stream(Object.assign({pass: "js2ast-in.txt"}, opts)): new PassThrough())
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
-        .pipe(thru2(/*{objectMode: false},*/ xform, flush)) //collect and compile code
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "js2ast"}, opts)): new PassThrough());
+        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //collect and compile code
 /*NOTE: REPL doesn't really add any value - can load module from source code instead
     if ("run" in opts) //execute logic
     {
@@ -757,6 +779,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //compile and get AST:
 //        console.error(`${this.chunks.length} chunks at flush`);
 //        if (opts.echo) console.error(`js dsl ${this.chunks.length} in:`, this.chunks.join("\n").cyan_lt.color_reset); //show source code input
+        global.opts = opts || {}; //make command line args accessible to child (dsl) module
         const module = RequireFromString(this.chunks.join("\n").nocolors);
         if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
 //            this.push(JSON.stringify(compiled, null, "  ") + "\n");
@@ -770,6 +793,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            {
 //            console.error("run ...".green_lt);
         module(); //execute load-time logic; start run-time sim if -run flag is present (see suffix)
+        delete global.opts;
 //            console.error("... ran".red_lt);
 //            }
 //debugger; //c = continue, n = step next, s = step in, o = step out, pause, run, repl, exec, kill, scripts, version, help
@@ -1811,7 +1835,7 @@ function CLI(more_opts)
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "input"}, opts)): new PassThrough())
+//        .pipe(opts.echo? echo_stream(Object.assign({pass: "input"}, opts)): new PassThrough())
         .pipe(opts.preproc? preproc(opts): new PassThrough())
 //        .pipe(opts.echo? echo_stream(opts): new PassThrough())
 //        .pipe(ReplStream(opts))

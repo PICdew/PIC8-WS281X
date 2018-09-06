@@ -23,7 +23,7 @@ const TRISA1 = TRISA.Bit(0x01);
 const RA1 = PORTA.Bit(0x01);
 
 const TMR1 = PIC.Reg({bits: 0xffff, addr: 0x0c});
-const PIR1 = PIC.Reg({bits: 0ff, addr: 0x09});
+const PIR1 = PIC.Reg({bits: 0xff, addr: 0x09});
 const T1IF = PIR1.Bit(0x04);
 
 #endif //ndef PIC16F1827_H

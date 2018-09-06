@@ -96,5 +96,10 @@ Register.prototype.toAST = function()
 }
 */
 
+//macros:
+#define MHz  *1000000
+#define KHz  *1000
+
+
 #endif //ndef PIC8_HW_H
 //eof
