@@ -9,6 +9,8 @@
 
 #include "pic16x.h"
 
+const PIC/*16F1827*/ = new PIC8X({memlen: 386, device: "16F1827"});
+
 //PIC16F1827:
 //registers:
 //see datasheet for details

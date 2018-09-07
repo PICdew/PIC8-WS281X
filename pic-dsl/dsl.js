@@ -357,11 +357,11 @@ function directive(cmd, linebuf) //, linenum)
 //        case "define"
         case "warning": //convert to console output (so that values will be expanded)
 //NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
-            return `console.error((${linebuf.trim()} + " @${this.srcline}").yellow_lt);`; //add outer () if not there (remove + readd)
+            return `console.error((${maybe_eval(linebuf/*.trim()*/)} + " @${this.srcline}").yellow_lt);`; //add outer () if not there (remove + readd)
         case "error": //convert to console output (so that values will be expanded)
 //            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
 //            return `console.error(${linebuf}); process.exit(1);`;
-            return `throw (${linebuf} + " @${this.srcline}").red_lt`; //leave quotes, parens as is
+            return `throw (${maybe_eval(linebuf)} + " @${this.srcline}").red_lt`; //leave quotes, parens as is
 //additional source file:
         case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
 //            debugger;
@@ -474,6 +474,21 @@ function directive(cmd, linebuf) //, linenum)
 //            return linebuf; //leave as-is
 //            return `throw "unrecognized pre-processor directive '${cmd}' at line ${this.srcline}";`.red_lt; //give down-stream compile-time error
             throw `unrecognized pre-processor directive '${cmd}' at line ${this.srcline}`.red_lt; //give down-stream compile-time error
+    }
+
+    function maybe_eval(str)
+    {
+        const EVAL_xre = XRegExp(`
+        \\$  \\{
+            (?<expr>  [^}]+ )
+        \\}
+        `, "xg");
+        return str.replace(EVAL_xre, (match) =>
+        {
+            var expr = expand_macros(match.expr);
+            try { return vm.runInContext(expr, opts.macros, VM_OPTS); }
+            catch(exc) { error(exc); return expr; }
+        });
     }
 }
 
@@ -1695,6 +1710,10 @@ function pushline(str)
 //prototype extensions:
 function extensions()
 {
+//    if (extensions.did) return; //1x only
+//    extensions.did = true;
+    if (isNaN(++extensions.count)) extensions.count = 1;
+    console.error(`extensions: count ${extensions.count} @${__line}`);
 //arrays:
     if (!Array.prototype.last)
         Object.defineProperty(Array.prototype, "last",
@@ -1707,7 +1726,7 @@ function extensions()
     JSON5.stringify = function(args)
     {
 //    console.error("json5.stringify: " + typeof sv_stringify);
-        return this.sv_stringify.apply(JSON5, Array.from(arguments)).replace(/,([a-z0-9])/gi, ", $1").replace(/:/g, ": "); //put a space after comma and color for easier readability
+        return (this.sv_stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
     }
 //XRegExp is interchangeable with RE, so make the API interchangeable as well:
 //    console.log(String.prototype.match.toString());

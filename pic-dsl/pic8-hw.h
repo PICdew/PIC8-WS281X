@@ -3,6 +3,8 @@
 #ifndef PIC8_HW_H
 #define PIC8_HW_H
 
+//const util = require("util");
+
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
@@ -10,33 +12,52 @@
 //
 
 //overall device (memory + clock):
-//use function-stlye ctors to allow call without "new" (allows parent to be passed in)
+//use function-style ctors to allow call without "new" or private scoped vars
+//class MPU
 function MPU(opts)
 {
+console.error("mpu here1");
     if (!(this instanceof MPU)) return new MPU(opts);
-    this.opts = Object.assign({}, opts || {}); //shallow copy
+    var total = 0, seen = {}; //private
+console.error("mpu here2");
+
+    function constructor(opts)
+    {
+        this.opts = Object.assign({}, opts || {}); //shallow copy
+console.error("mpu here3");
+console.error(JSON.stringify(this.opts));
+//console.error(`this is a ${typeof this}, ${this.constructor.name}, is MPU? ${this instanceof MPU}`);
 //validate memory defs:
-    var total = 0, seen = {};
-    for (var b in this.opts.banks || {})
-    {
-        const bank = this.opts.banks[b];
-        chkbank(bank, `bank ${b}`);
-    }
-    chklen("total bank");
-    if (this.opts.linear)
-    {
-        total = 0;
-        chkbank(this.opts.linear, "linear");
-        chklen("linear");
-    }
+        for (var b in this.opts.banks || {})
+        {
+            const bank = this.opts.banks[b];
+            this.chkbank(bank, `bank ${b}`);
+        }
+        this.chklen("total bank");
+        if (this.opts.linear)
+        {
+            total = 0;
+            this.chkbank(this.opts.linear, "linear");
+            this.chklen("linear");
+        }
+        this.chkclock();
 //TODO: validate clock speed
+    }
+
+//    function isthis()
+//    {
+//        if (!(this instanceof MPU)) throw `bad this: ${JSON5.stringify(this)}`.red_lt;
+//    }
 
     function chklen(desc)
     {
+//        isthis.call(this);
         if (total != this.opts.memlen) throw `MPU: ${desc} memory len ${total} != declared mem len ${this.opts.memlen}`.red_lt;
     }
+
     function chkbank(bank, name)
     {
+//        isthis.call(this);
         if (name) bank.name = name;
         if (bank.end <= bank.begin) throw `MPU: bad ${bank.name} len (begin ${bank.begin}, end ${bank.end})`.red_lt;
         total += bank.end - bank.begin + 1;
@@ -46,10 +67,14 @@ function MPU(opts)
             seen[bank.name] = bank;
         }
     }
+
+    [constructor, chklen, chkbank].forEach((method) => { this[method.name] = method; }); //copy nested functions to instance object
+    this.constructor(opts);
 }
 
 
 //registers:
+//use function-style ctors to allow call without "new" (allows parent to be passed in)
 const Reg =
 MPU.prototype.Reg =
 function Reg(opts, parent)
@@ -69,6 +94,7 @@ function Reg(opts, parent)
 }
 
 //sub-registers:
+//use function-style ctors to allow call without "new" (allows parent to be passed in)
 const Bit =
 Reg.prototype.Bit = 
 function Bit(opts, parent)
