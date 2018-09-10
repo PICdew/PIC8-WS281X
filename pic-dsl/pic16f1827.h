@@ -7,11 +7,48 @@
 #define PIC16F1827_H
 
 
-#include "pic16x.h"
+//#include "pic16x.h"
+#include "pic8-hw.h"
 
-const PIC/*16F1827*/ = new PIC8X({memlen: 386, device: "16F1827"});
+#define memlen(type)  (type.last - type.first + 1)
+
 
 //PIC16F1827:
+//8-bit PIC, extended instr set
+const PIC/*16F1827*/ = new PIC8X(
+{
+    device: "16F1827",
+//memory:
+    gpramlen: 384,
+    flashlen: 4 K, //0x1000
+    eepromlen: 256,
+    banks:
+    {
+        0: {first: 0x20, last: 0x70-1}, //80
+        1: {first: 0xA0, last: 0xF0-1}, //80
+        2: {first: 0x120, last: 0x170-1}, //80
+        3: {first: 0x1A0, last: 0x1F0-1}, //80
+        4: {first: 0x220, last: 0x250-1}, //48
+        shared: {first: 0x70, last: 0x80-1}, //16
+    },
+    linear: {first: 0x2000, get last() { return 0x2000 + this.gpramlen - memlen(this.banks.shared) - 1; }}, //NOTE: linear addressing excluded shared gpram
+    pages:
+    {
+        0: {first: 0, last: 0x800-1}, //1K words (2K bytes)
+        1: {first: 0x800, last: 0x1000-1}, //1K words (2K bytes)
+    },
+    flash: {begin: 0x8000, get end() { return this.flash.begin + this.flashlen}},
+    id: 0x8006, //device ID
+    config: {first: 0x8007, last: 0x8008},
+    eeprom: {first: 0xF000, last: 0xF100-1}, //256 bytes
+//clock:
+    osc_def: 500 KHz, //NOTE: MF, not HF!
+    max_extclk: 32 MHz,
+    max_intosc: 8 MHz,
+    has_PLL: true,
+});
+
+
 //registers:
 //see datasheet for details
 #define TRISA_ADDR  0x91

@@ -8,7 +8,7 @@
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
-/// Static representation (h/w model):
+/// Static representation (h/w model), no run-time sim:
 //
 
 //overall device (memory + clock):
@@ -16,22 +16,22 @@
 //class MPU
 function MPU(opts)
 {
-console.error("mpu here1");
+//console.error("mpu here1");
     if (!(this instanceof MPU)) return new MPU(opts);
     var total = 0, seen = {}; //private
-console.error("mpu here2");
+//console.error("mpu here2");
 
     function constructor(opts)
     {
         this.opts = Object.assign({}, opts || {}); //shallow copy
-console.error("mpu here3");
-console.error(JSON.stringify(this.opts));
+//console.error("mpu here3");
+//console.error(JSON.stringify(this.opts));
 //console.error(`this is a ${typeof this}, ${this.constructor.name}, is MPU? ${this instanceof MPU}`);
 //validate memory defs:
         for (var b in this.opts.banks || {})
         {
             const bank = this.opts.banks[b];
-            this.chkbank(bank, `bank ${b}`);
+            this.chkbank(bank, isNaN(b)? b: `bank ${b}`);
         }
         this.chklen("total bank");
         if (this.opts.linear)
@@ -68,7 +68,12 @@ console.error(JSON.stringify(this.opts));
         }
     }
 
-    [constructor, chklen, chkbank].forEach((method) => { this[method.name] = method; }); //copy nested functions to instance object
+    function chkclock()
+    {
+        console.error(`TODO: check clock ${this.opts.clock}`.red_lt);
+    }
+
+    [constructor, chklen, chkbank, chkclock].forEach((method) => { this[method.name] = method; }); //copy nested functions to instance object
     this.constructor(opts);
 }
 
@@ -122,9 +127,16 @@ Register.prototype.toAST = function()
 }
 */
 
-//macros:
+class PIC8X extends MPU
+{
+    constructor(opts) { super(opts); }
+};
+
+
+//macros for readability:
 #define MHz  *1000000
 #define KHz  *1000
+#define K  *1000
 
 
 #endif //ndef PIC8_HW_H
