@@ -678,39 +678,63 @@ function shebang_args(str)
      |  " ( .*? ) "  #non-greedy
      |  \\S+
         `, "xg");
-*/
     const KEEP_xre = XRegExp(`
         \\s*
         (  #quoted string
-            (?<quotype> (?<! [\\\\] ) ['"] )  #capture opening quote type; negative look-behind to skip escaped quotes
+            (?<quotype> (?<! \\\\ ) ['"] )  #capture opening quote type; negative look-behind to skip escaped quotes
             (?<quostr>
-                (?: . (?! (?<! [\\\\] ) \\k<quotype> ) )  #exclude escaped quotes; use negative lookahead because it's not a char class
+                (?: . (?! (?<! \\\\ ) \\k<quotype> ))  #exclude escaped quotes; use negative lookahead because it's not a char class
                 .*?  #capture anything up until trailing quote (non-greedy)
             )
             \\k<quotype>  #trailing quote same as leading quote
         |  #or bare (space-terminated) string
             (?<barestr>
 #                ( (?<! [\\\\] ) [^\\s\\n\\#] )+  #any string up until non-escaped space, newline or "#"
-                (?: . (?! (?<! [\\\\] ) ( \\s | \\n | \\# ) ) ) +  #exclude escaped space, newline, or "#"; use negative lookahead because it's not a char class
+                (?: . (?! (?<! \\\\ ) [\\s\\n\\#] )) +  #exclude escaped space, newline, or "#"; use negative lookahead because it's not a char class
+                .*?  #capture anything not above (non-greedy)
+                (?: [\\s\\n\\#] )
             )
         )
         \\s*
-        `, "xg");
+*/
+    const KEEP_xre = XRegExp(`
+        (?: \\s* )  #skip leading white space (greedy, not captured)
+        (?<trimmed>  #kludge: need another capture level; match[0] will include leading/trailing spaces even though non-capturing
+            (
+                (  #take quoted string as-is
+                    (?: (?<quotype> (?<! \\\\ ) ['"] ))  #opening quote type; negative look-behind to skip escaped quotes
+                    (
+                        (?: . (?! (?<! \\\\ ) \\k<quotype> ))  #exclude escaped quotes; use negative lookahead because it's not a char class
+                        .*?  #capture anything up until trailing quote (non-greedy)
+                    )
+                    (?: \\k<quotype> )  #trailing quote same as leading quote (not captured)
+                )
+            |
+                (?<= \\\\ ) [\\s\\n\\#]  #or take escaped space/newline/"#" as regular chars; positive look-behind
+            |
+                [^\\s\\n\\#]  #or any other char
+            )+  #multiple occurrences of above (greedy)
+        )
+        (?: \\s* )  #skip trailing white space (greedy, not captured)
+        `, "x"); //"gmxy");
 //        (?: \\n | $ )
 //    str.replace(/\s*#.*$/, ""); //strip trailing comment
 //    return (which < 0)? [str]: str.split(" "); //split into separate args
 //    return (str || "").replace(COMMENT_xre, "").split(UNQUO_SPACE_xre).map((val) => { return val.unquoted || val}); //strip comment and split remaining string
 debug(`${"shebang str".cyan_lt}: '${str}'`);
 //debug(!!"0");
-    var ofs = 0, matches = [];
-    for (;;)
-    {
-        var match = XRegExp.exec(str || "", KEEP_xre, ofs, "sticky");
-        if (!match) break;
-        debug(`${"match".blue_lt}: ${JSON.stringify(match)}, ${"quostr".cyan_lt} '${match.quostr}', ${"barestr".cyan_lt} '${match.barestr}'`);
-        matches.push(`${match.quostr || match.barestr}`); // || ""}`);
-        ofs = match.index + match[0].length;
-    }
+    var matches = [];
+//    for (var ofs = 0;;)
+//    {
+//        var match = XRegExp.exec(` ${str}` || "", KEEP_xre); //, ofs, "sticky");
+//        if (!match) break;
+    XRegExp.forEach(str || "", KEEP_xre, (match, inx) => { matches.push(match.trimmed); }); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
+//    {
+//        debug(`match[${inx}]:`.blue_lt, JSON.stringify(match), match.trimmed.quoted.cyan_lt); //, ${"quostr".cyan_lt} '${match.quostr}', ${"barestr".cyan_lt} '${match.barestr}'`);
+//        matches.push(match.trimmed); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
+//        ofs = match.index + match[0].length;
+//    }
+//    });
     return matches;
 }
 //(?:x)  non-capturing match
@@ -719,6 +743,20 @@ debug(`${"shebang str".cyan_lt}: '${str}'`);
 //x(?<=y)  positive lookbehind
 //x(?<!y)  negative lookbehind
 
+//debug(unquoescape('"hello"'));
+//debug(unquoescape('\\#not thing'));
+//debug(unquoescape('-xa="b c"'));
+//process.exit(0);
+function unquoescape(str)
+{
+    const UNESC_QUOTE_xre = XRegExp(`
+        (<! \\\\ ) ['"]  #unescaped quote; negative look-behind
+    |
+        [\\\\'"]  #esc and quote chars
+        `, "gx"); //"gmxy");
+    return (str || "").replace(UNESC_QUOTE_xre, "");
+}
+//(?: (?<quotype> (?<! \\\\ ) ['"] ))  #opening quote type; negative look-behind to skip escaped quotes
 
 //remove comment:
 //handles // or /**/
@@ -748,7 +786,7 @@ function quostr(name)
       |
         \n  #just match newline on non-comment lines
         `, "xg");
-    if (isNaN(++quostr.count)) quostr.count = 1; //use unique name each time
+    if (isNaN(++quostr.count)) quostr.count = 1; //use unique name each time in case multiple included within same parent regex
 //CAUTION: use "\\" because this is already within a string
     return `
 #        \\s*  #skip leading white space
@@ -784,9 +822,9 @@ function spaceRE(str) { return `\\s*${str || ""}\\s*`; }
 
 
 //quote a string if it contains spaces:
-function spquote(str)
+function spquote(str, quotype)
 {
-    return (str || "").match(/\s/)? str.quoted: str;
+    return (str || "").match(/\s/)? quote(str, quotype): str;
 }
 
 
@@ -1053,7 +1091,7 @@ function extensions()
     String.prototype.replace = function(xre, newstr) { return XRegExp.replace(this, xre, newstr); };
 //    console.log(String.prototype.match.toString());
     String.prototype.quote = function(quotype) { return quote(this/*.toString()*/, quotype); }
-    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
+//    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
 //conflict with prop:    String.prototype.color_reset = function(color) { return color_reset(this.toString(), color); }
     String.prototype.echo_stderr = function(desc) { console.error(`${desc || "echo_stderr"} @${srcline(1)}`, this/*.toString()*/); return this; }
     Object.defineProperties(String.prototype,
@@ -1062,8 +1100,9 @@ function extensions()
         quoted1: { get() { return quote(this/*.toString()*/, "'"); }, },
         unquoted: { get() { return unquote(this/*.toString()*/); }, },
         unparen: { get() { return unparen(this/*.toString()*/); }, },
+        unquoescaped: { get() { return unquoescape(this/*.toString()*/); }, },
         unindent: { get() { return unindent(this); }, },
-        spquote: { get() { return spquote(this); }, },
+//        spquote: { get() { return spquote(this); }, },
         anchorRE: { get() { return anchorRE(this/*.toString()*/); }, },
         spaceRE: { get() { return spaceRE(this/*.toString()*/); }, },
 //        color_reset: { get() { return color_reset(this/*.toString()*/); }, },
@@ -1123,8 +1162,9 @@ function CLI(opts)
                 )?
             `.anchorRE, "x");
 //debug(debug_out.join_flush("\n"));
-            const parts = (/*arg.unquoted ||*/ arg).match(OPTION_xre);
-            if (!parts /*|| ((parts.onoff == "+") && (parts.value !== undefined))*/) { debug_out.push("INVALID\n".red_lt); unused(argdesc, arg); return error(`invalid option in ${argdesc}: '${arg}'`); }
+            const parts = arg.unquoescaped.match(OPTION_xre) || {name: arg.unquoescaped};
+//            debug(parts.name, parts.value);
+//            if (!parts /*|| ((parts.onoff == "+") && (parts.value !== undefined))*/) { debug_out.push("INVALID\n".red_lt); unused(argdesc, arg); return error(`invalid option in ${argdesc}: '${arg}'`); }
 //debug(argdesc, arg.quoted, typeof parts.onoff, typeof parts.name, typeof parts.value, parts.value === undefined);
 //            if (!parts.onoff && (parts.value === undefined)) parts = {name: "filename", value: parts.name/*.unquoted || parts.name).quoted1*/, }; //treat stand-alone value as filename; strip optional quotes //and then re-add
             if (parts.value === undefined) Object.assign(parts, parts.onoff? {value: (parts.onoff == "+")}: {value: parts.name, name: "filename"});
@@ -1135,7 +1175,7 @@ function CLI(opts)
 //                debug_out.last += "OVERRIDE ".yellow_lt;
 //            }
 //debug(typeof parts.onoff, typeof parts.name, typeof parts.value);
-            debug_out.push(`${parts.name} = ${parts.value.toString().spquote}\n`.cyan_lt); //${opts[parts.name.toLowerCase()]}`.cyan_lt;
+            debug_out.push(`${parts.name} = ${spquote(parts.value.toString(), "'")}\n`.cyan_lt); //${opts[parts.name.toLowerCase()]}`.cyan_lt;
             switch (parts.name)
             {
                 case "debug": opts.debug = parts.value; break;
@@ -1153,18 +1193,21 @@ function CLI(opts)
 //    });
     if (opts.debug && debug_out.length) debug(debug_out.join(""));
 //#!./prexproc.js ./pic8-dsl.js +debug \#not-a-comment "arg with space" +preproc -DX  -UX  -DX=4  -DX="a b" +echo +ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
-    debug(`regexproc: ${files.length} source file${files.plurals} to process ...`.green_lt);
-    if (!files.length) files.push("-"); //read from stdin if no other files specified
+    debug(`regexproc: ${files.length} source file${files.plurals()} to process ...`.green_lt, files.join(", ".blue_lt));
+    if (!files.length) files.push("-"); //read from stdin if no other input files specified
 //    if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
+    files.index = 0;
     var regurge = [];
     CaptureConsole.startCapture(process.stdout, (outbuf) => { regurge.push(outbuf); });
     const instrm = CombinedStream.create();
     instrm.append((next) => //lazy load next file
     {
-        const filename = files[files.index], is_stdin = (filename == "-");
+//        const filename = files[files.index], is_stdin = (filename == "-");
+        var filename;
         const {strm, desc} =
-            regurge.length? {strm: str2strm(regurge.join_flush("\n")), desc: `${regurge.length} regurge line${regurge.plurals}`}: //inject stdout back into input stream; allows self-modifying source code :)
-            (files.index < files.length)? {strm: is_stdin? process.stdin: fs.createReadStream(filename), desc: `file[${files.index || 0}/${files.length}] '${filename}'`}:
+            regurge.length? {strm: str2strm(regurge.join_flush("\n")), desc: `${regurge.length} regurge line${regurge.plurals()}`}: //inject stdout back into input stream; allows self-modifying source code :)
+//            (files.index < files.length)? {strm: is_stdin? process.stdin: fs.createReadStream(filename), desc: `file[${files.index || 0}/${files.length}] '${filename}'`}:
+            filename = files[files.index++]? {strm: (filename == "-")? process.stdin: fs.existsSync(filename) && fs.createReadStream(filename), desc: `file[${files.index - 1}/${files.length}] '${filename}'`}:
             {desc: "eof"};
         debug(`next read ${desc} ...`.green_lt);
         next(strm);
