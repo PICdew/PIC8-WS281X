@@ -16,9 +16,9 @@ const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node
 const Duplex = DuplexStream; //TODO: API is different
 const {/*Readable, Writable, Duplex,*/ PassThrough} = require("stream");
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-const preproc = require("./preproc");
+//const preproc = require("./preproc");
 
-extensions();
+//extensions();
 module.exports.version = "1.0";
 const CWD = ""; //param for pathlib.resolve()
 
@@ -1343,7 +1343,7 @@ function CLI(more_opts)
 //        .pipe(PreProc(infile))
 //        .pipe(fixups())
 //        .pipe(opts.echo? echo_stream(Object.assign({pass: "input"}, opts)): new PassThrough())
-        .pipe(opts.preproc? preproc(opts): new PassThrough())
+//        .pipe(opts.preproc? preproc(opts): new PassThrough())
 //        .pipe(opts.echo? echo_stream(opts): new PassThrough())
 //        .pipe(ReplStream(opts))
         .pipe(dsl2js(opts)) //Object.assign(opts, more_opts || {})))
