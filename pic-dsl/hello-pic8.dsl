@@ -1,4 +1,4 @@
-#!./prexproc.js ./pic8-dsl.js "arg with space" +debug \#not-a-comment +preproc "not #comment" -DX -UX -DX=4 -DX="a b" +echo +ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
+#!./prexproc.js +debug +echo +hi#lo ./pic8-dsl.js "arg with space" +debug \#not-a-comment +preproc "not #comment" -DX -UX -DX=4 -DX="a b" +echo +ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
 //NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
 //"use strict";

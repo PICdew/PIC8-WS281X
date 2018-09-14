@@ -720,6 +720,7 @@ const shebang_args =
 module.exports.shebang_args =
 function shebang_args(str)
 {
+    debug("shebang args", str);
 /*
     const COMMENT_xre = XRegExp(`
         \\s*  #skip white space
@@ -754,7 +755,8 @@ function shebang_args(str)
         \\s*
 */
     const KEEP_xre = XRegExp(`
-        (?: \\s* )  #skip leading white space (greedy, not captured)
+#        (?<= \\s )  #leading white space (look-behind)
+        (?: ^ | \\s+ )  #skip leading white space (greedy, not captured)
         (?<trimmed>  #kludge: need another capture level; match[0] will include leading/trailing spaces even though non-capturing
             (
                 (  #take quoted string as-is
@@ -771,8 +773,9 @@ function shebang_args(str)
                 [^\\s\\n\\#]  #or any other char
             )+  #multiple occurrences of above (greedy)
         )
-        (?: \\s* )  #skip trailing white space (greedy, not captured)
-        `, "x"); //"gmxy");
+        (?: \\s+ | $ )  #skip trailing white space (greedy, not captured)
+#        (?= \s )  #trailing white space (look-ahead)
+        `, "x"); //"gxy"); //"gmxy");
 //        (?: \\n | $ )
 //    str.replace(/\s*#.*$/, ""); //strip trailing comment
 //    return (which < 0)? [str]: str.split(" "); //split into separate args
@@ -784,7 +787,7 @@ function shebang_args(str)
 //    {
 //        var match = XRegExp.exec(` ${str}` || "", KEEP_xre); //, ofs, "sticky");
 //        if (!match) break;
-    XRegExp.forEach(str || "", KEEP_xre, (match, inx) => { matches.push(match.trimmed); }); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
+    XRegExp.forEach(str || "", KEEP_xre, (match, inx) => { debug(`#!${inx}`, match); matches.push(match.trimmed); }); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
 //    {
 //        debug(`match[${inx}]:`.blue_lt, JSON.stringify(match), match.trimmed.quoted.cyan_lt); //, ${"quostr".cyan_lt} '${match.quostr}', ${"barestr".cyan_lt} '${match.barestr}'`);
 //        matches.push(match.trimmed); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
@@ -1252,7 +1255,8 @@ function CLI(opts)
                     break;
 //see case regex idea from: https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&cad=rja&uact=8&ved=2ahUKEwjwy5qeqLTdAhVF2VMKHWnYC74QFjAAegQIAxAB&url=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F2896626%2Fswitch-statement-for-string-matching-in-javascript&usg=AOvVaw2-zByz2vpbiILX3nCtu5xT
                 case parts.name.match(/^[DU]/) && parts.name:
-                    startup_code.push(`#${(parts.name[0] == "D")? "define": "undef"} ${parts.name.substr(1)}  ${parts.value || ""}`); break; //define(parts.name, parts.value); break;
+                    const Directives = {D: "#define", U: "#undef"}; //cmd line arg => #directive
+                    startup_code.push(`${Directives[parts.name[0]]} ${parts.name.substr(1)}  ${parts.value || ""}`); break; //define(parts.name, parts.value); break;
 //                case parts.name.match(/^U/) && parts.name: startup_code.push(`#undef ${parts.name.substr(1)}`); break; //undef(parts.name); break;
                 default:
                     unused(argdesc, arg);
