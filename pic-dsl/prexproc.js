@@ -136,7 +136,7 @@ function echo_stream(opts)
     const destfile = opts.filename? pathlib.basename(opts.filename.unquoted, pathlib.extname(opts.filename.unquoted)): __file;
     debug(`echo to ${destfile}.txt ...`);
     const echostrm = /*opts.pass &&*/ fs.createWriteStream(`${destfile}.txt`); //`${destfile || "stdin"}${opts.pass? `-${opts.pass}`: ""}.txt`);
-    return Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
+    return thru2(xform, flush); //Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
 //    const instrm = new PassThrough(); //wrapper end-point
 //    const outstrm = instrm
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
@@ -156,7 +156,7 @@ function echo_stream(opts)
 //            /*if (opts.echo)*/ console.error(chunk/*.replace(/\n/gm, "\\n")*/.cyan_lt); //this.chunks.join("\n").cyan_lt); //echo to stderr so it doesn't interfere with stdout; drop newlines because console.error will send one anyway
 //        }
 //debug(this.pushline? `pushline ${chunk}`.green_lt: "no pushline".red_lt);
-        this.pushline(chunk);
+        this.push/*line*/(chunk); // + "\n");
         cb();
     }
     function flush(cb) { cb(); } //debug(`eof ${this.numlines} lines`); cb(); }
@@ -173,7 +173,7 @@ module.exports.shebang =
 function shebang(opts)
 {
     opts = opts || {};
-    return Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
+    return thru2(xform, flush); //Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
 
     function xform(chunk, enc, cb)
     {
@@ -189,7 +189,7 @@ function shebang(opts)
 //        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
 //            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.chunks.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
         if (!opts.shebang && (this.numlines == 1) && chunk.match(SHEBANG_xre)) chunk = "//" + chunk.blue_lt; //`${chunk} //${chunk.length}:line 0 ${opts.filename || "stdin"}`.blue_lt; //cb(); return; } //skip shebang; must be first line
-        this.pushline(chunk);
+        this.push/*line*/(chunk);
         cb();
     }
     function flush(cb) { cb(); }
@@ -370,7 +370,7 @@ debug(`${__file} opts`.blue_lt, JSON5.stringify(opts || {}));
         .pipe(opts.echo? echo_stream(Object.assign({}, opts, {filename: opts.infilename || `${__file}-in`})): new PassThrough()) //echo top-level only
 //EXTRA NEWLINES:        .pipe(new LineStream({keepEmptyLines: true, })) //preserve line#s (for easier debug and correct #directive handling)
         .pipe(byline.createStream(new shebang(opts), {keepEmptyLines: true}))
-        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
+        .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts})) //, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
         .pipe(opts.echo? echo_stream(Object.assign({}, opts, {filename: opts.outfilename || `${__file}-out`})): new PassThrough()); //echo top-level only
 //    const retval =
     return new Duplex(outstrm, instrm); //return end-point wrapper for more pipelining; CAUTION: swap in + out
@@ -388,6 +388,7 @@ function preproc_xform(chunk, enc, cb)
 //        if (!this.chunks) this.chunks = [];
     if (isNaN(++state.numlines)) state.numlines = 1;
     if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
+    chunk += "\n"; //add newlines back after byline stripped them
 //        procline.call(this, chunk, cb);
 //if (this.numlines == 1) debug(`xform ctor ${this.constructor.name}, tag ${this.djtag}`);
 //debug(`${chunk} //${chunk.length}:line ${this.numlines} ${opts.filename || "stdin"}`.blue_lt);
@@ -500,7 +501,7 @@ if (false)            this.pause(); //no-; pause flow of input stream until nest
 //EXTRA NEWLINES:                .pipe(new LineStream({keepEmptyLines: false, })) //preserve line#s (for easier debug and correct #directive handling)
                 .pipe(byline.createStream(new shebang(opts), {keepEmptyLines: true}))
 //                .on("data", (buf) => { this.push/*line*/(`${buf}`.blue_lt.color_reset); }) //write to parent
-                .pipe(Object.assign(thru2(preproc_xform, preproc_flush), {opts, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
+                .pipe(Object.assign(thru2(preproc_xform, preproc_flush), {opts})) //, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
                 .on("data", (buf) => { this.push(buf); }) //debug(`got-${nested_strm.filename} '${buf}'`.cyan_lt, this === THIS); THIS.push(buf); })
 //                {
 //                    this.push(buf);
@@ -1251,11 +1252,12 @@ function ary2dict(ary)
 function nop(arg) { return arg; }
 
 
-function pushline(str)
-{
-    this.push(str);
-    this.push("\n");
-}
+//don't use; generates extra records
+//function pushline(str)
+//{
+//    this.push(str);
+//    this.push("\n");
+//}
 
 //safely evaluate a string expr:
 //for warnings about eval(), see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
