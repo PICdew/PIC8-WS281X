@@ -17,8 +17,17 @@ const CaptureConsole = require("capture-console"); //https://github.com/joepie91
 //streams:
 //TODO? const miss = require("mississippi"); //stream utils
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
+const /*{LineStream}*/ byline = require('byline');
+//kludge: LineStream() generates extra linefeeds when piped, so use wraper function API instead:
+//NO WORKY: function LineStream(opts)
+//{
+//    if (!(this instanceof LineStream)) return new LineStream(opts);
+////                .pipe(createStream(new shebang(opts), {keepEmptyLines: true}))
+//    const instrm = new PassThrough(); //inner end-point
+//    const outstrm = createStream(instrm, {keepEmptyLines: true, });
+//    return new Duplex(outstrm, instrm); //return end-point wrapper for more pipelining; CAUTION: swap in + out
+//}
 //const RequireFromString = require('require-from-string');
-const {LineStream} = require('byline');
 const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node-duplex-stream
 const CombinedStream = require("combined-stream2"); //
 const {Readable, /*Writable, Duplex,*/ PassThrough} = require("stream");
@@ -139,8 +148,9 @@ function echo_stream(opts)
         if (isNaN(++this.numlines)) this.numlines = 1;
 //debug(`here4 ${this.numlines}`);
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-        if (echostrm) echostrm.write(chunk + "\n"); //to file
-        else console.error(chunk.cyan_lt); //echo to stderr so it doesn't interfere with stdout; omit newlines because console.error will add one anyway
+//        chunk = chunk.replace(/\n/g, "\\n");
+        if (echostrm) echostrm.write(chunk); // + "\n"); //to file
+        else console.error(chunk.replace(/\n$/, "").cyan_lt); //echo to stderr so it doesn't interfere with stdout; omit newlines because console.error will add one anyway
 //        {
 //            if (this.numlines == 1) console.error("preproc out:");
 //            /*if (opts.echo)*/ console.error(chunk/*.replace(/\n/gm, "\\n")*/.cyan_lt); //this.chunks.join("\n").cyan_lt); //echo to stderr so it doesn't interfere with stdout; drop newlines because console.error will send one anyway
@@ -178,7 +188,7 @@ function shebang(opts)
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
 //            if (!opts.shebang && (this.linenum == 1) && chunk.match(/^\s*#\s*!/)) { this.chunks.push("//" + chunk + "\n"); cb(); return; } //skip shebang; must occur before prepend()
-        if (!opts.shebang && (this.numlines == 1) && chunk.match(SHEBANG_xre)) chunk = `//${chunk} //${chunk.length}:line 0 ${opts.filename || "stdin"}`; //.blue_lt); cb(); return; } //skip shebang; must occur before prepend()
+        if (!opts.shebang && (this.numlines == 1) && chunk.match(SHEBANG_xre)) chunk = "//" + chunk.blue_lt; //`${chunk} //${chunk.length}:line 0 ${opts.filename || "stdin"}`.blue_lt; //cb(); return; } //skip shebang; must be first line
         this.pushline(chunk);
         cb();
     }
@@ -358,8 +368,8 @@ debug(`${__file} opts`.blue_lt, JSON5.stringify(opts || {}));
     const outstrm = instrm
 //        .pipe((opts.echo && !opts.nested)? echo_stream(Object.assign({pass: "regexproc-in"}, opts)): new PassThrough()) //echo top-level only
         .pipe(opts.echo? echo_stream(Object.assign({}, opts, {filename: opts.infilename || `${__file}-in`})): new PassThrough()) //echo top-level only
-        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
-        .pipe(new shebang(opts))
+//EXTRA NEWLINES:        .pipe(new LineStream({keepEmptyLines: true, })) //preserve line#s (for easier debug and correct #directive handling)
+        .pipe(byline.createStream(new shebang(opts), {keepEmptyLines: true}))
         .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
         .pipe(opts.echo? echo_stream(Object.assign({}, opts, {filename: opts.outfilename || `${__file}-out`})): new PassThrough()); //echo top-level only
 //    const retval =
@@ -466,29 +476,32 @@ function preproc_xform(chunk, enc, cb)
         {
 //debug(!!processed.pipe, !!processed.linebuf);
             if (processed.pipe) [nested_strm, processed] = [processed, processed.linebuf]; //extract+save stream object
+//            if (processed != "\n") {
             processed = `${processed} //${processed.length}:line ${this.srcline}`; //+ "\n"); //chunk); //re-add newline to compensate for LineStream
 //debug(processed);
-            if (/*opts.bypass.top*/ old_bypass) processed = `//${processed}`.gray_dk;
+            if (/*opts.bypass.top*/ old_bypass) processed = "//" + `${processed}`.gray_dk;
 //if (this.numlines < 4) debug(processed.replace(/\n/gm, "\\n"));
-            this.push/*line*/(processed); //`${processed}`.cyan_lt.color_reset);
+            this.push/*line*/(processed.replace(/\n/g, "\\n") + ` depth ${opts.state.length}`); //`${processed}`.cyan_lt.color_reset);
         }
         if (nested_strm) //stream object (from #include); expand in-place
         {
 //                const THAT = this;
-            this.push/*line*/(`//start '${nested_strm.filename}' ...`.green_lt);
-            this.pause(); //pause flow of input stream until nested file is done
+            this.push/*line*/("//" + `start '${nested_strm.filename}', depth was ${opts.state.length} ...`.green_lt);
+if (false)            this.pause(); //no-; pause flow of input stream until nested file is done
 //            const THAT = this;
 //            THAT.opts = Object.assign({}, opts, {infilename: nested_strm.filename});
             opts.state.push_incl(nested_strm.filename); //NOTE: bypass would be false, otherwise wouldn't be processing this line
 //this.push/*line*/("insert file contents here".red_lt);
 //eof.call(this);
+//            const THIS = this;
             nested_strm
 //                .pipe(preproc(Object.assign({}, opts, {filename: processed.filename.quoted1, bypass_startlen: opts.bypass.length, nested: true})))
-                .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
-                .pipe(new shebang(opts))
+//                .pipe(createStream(new shebang(opts), {keepEmptyLines: true}))
+//EXTRA NEWLINES:                .pipe(new LineStream({keepEmptyLines: false, })) //preserve line#s (for easier debug and correct #directive handling)
+                .pipe(byline.createStream(new shebang(opts), {keepEmptyLines: true}))
 //                .on("data", (buf) => { this.push/*line*/(`${buf}`.blue_lt.color_reset); }) //write to parent
                 .pipe(Object.assign(thru2(preproc_xform, preproc_flush), {opts, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
-                .on("data", (buf) => { this.push(buf); })
+                .on("data", (buf) => { this.push(buf); }) //debug(`got-${nested_strm.filename} '${buf}'`.cyan_lt, this === THIS); THIS.push(buf); })
 //                {
 //                    this.push(buf);
 //                    nested_strm.pause();
@@ -514,13 +527,15 @@ function preproc_xform(chunk, enc, cb)
 //        }
     function eof(err) //, cb)
     {
-        const state = this.opts.state.pop_fluent().top;
+        const state = this.opts.state.top;
+debug(`eof: stack depth was ${this.opts.state.length}`, `top ${JSON5.stringify(state)}`);
 //        this.state.pop();
         if (err) error(`${state.filename} read error on line ${this.srcline}: ${exc}`);
 //        this.push(`//err ... resume line ${this.numlines} ${processed.filename || "stdin"}`.red_lt);
-        this.push/*line*/(`//${err? "err": "eof"} ... resume line ${state.filename || "stdin"}:${state.numlines}`.red_lt);
-        this.resume(); //continue flow from input stream
+        this.push/*line*/("//" + `${err? "err": "eof"} depth was ${this.opts.state.length} ... resume line ${state.filename || "stdin"}:${state.numlines}`.red_lt);
+if (false)        this.resume(); //no-; continue flow from input stream
 //        if ((opts.bypass || []).length) error(`unterminated #if on line ${this.srcline}`);
+        this.opts.state.pop();
         cb();
     }
 }
@@ -543,7 +558,7 @@ function preproc_flush(cb)
 //            this.linebuf += "\\"; //flush last partial line, don't expand macros since it was incomplete
 //        this.push/*line*/(`${opts.bypass.top? "//": ""}${this.linebuf}\\`); //flush last partial line, don't expand macros since last line was incomplete
         var processed = `${this.linebuf}\\`.cyan_lt;
-        if (state.bypass) processed = `//${processed}`.gray_dk;
+        if (state.bypass) processed = "//" + `${processed}`.gray_dk;
         this.push/*line*/(processed); //.cyan_lt.color_reset); //flush last partial line, don't expand macros since last line was incomplete
     }
 //    if (opts.dump_macros && isNaN(opts.bypass_startlen)) //dump macros at top-most level only
@@ -573,7 +588,7 @@ function directive(cmd, linebuf) //, linenum)
     {
         if (!opts.state.length) return error(`#${cmd} without #if on line ${this.srcline}`);
         opts.state[Unconditionals[cmd]](linebuf); //apply state change
-        return `//'${this.linebuf}' => ${Unconditionals[cmd]} bypass ${opts.state.top.bypass? "ON": "OFF"}, depth ${opts.state.length}`.yellow_lt;
+        return "//" + `'${this.linebuf}' => ${Unconditionals[cmd]} bypass ${opts.state.top.bypass? "ON": "OFF"}, depth is now ${opts.state.length}`.yellow_lt;
     }
     if (state.bypass) return; //ignore all other directives
     switch (cmd)
@@ -583,11 +598,11 @@ function directive(cmd, linebuf) //, linenum)
 //        case "define"
         case "warning": //convert to console output (so that values will be expanded)
 //NOTE: allow functions, etc; don't mess with quotes            if (!linebuf.match(/^[`'"].*[`'"]$/)) linebuf = "\"" + linebuf + "\"";
-            return `console.error((${maybe_eval(linebuf/*.trim()*/, "#warn")} + " ${this.srcline}").yellow_lt);`; //add outer () if not there (remove + readd)
+            return `console.error(\`${maybe_eval(linebuf/*.trim()*/, "#warn")} ${this.srcline}\`.yellow_lt);`; //add outer () if not there (remove + readd)
         case "error": //convert to console output (so that values will be expanded)
 //            if (!linebuf.match(/^`.*`$/)) linebuf = "`" + linebuf + "`";
 //            return `console.error(${linebuf}); process.exit(1);`;
-            return `throw (${maybe_eval(linebuf, "#err")} + " ${this.srcline}").red_lt`; //leave quotes, parens as is
+            return `throw \`${maybe_eval(linebuf, "#err")} ${this.srcline}\`.red_lt`; //leave quotes, parens as is
 //additional source file:
         case "include": //generate stmt to read file, but don't actually do it (REPL will decide)
 //            debugger;
@@ -658,10 +673,10 @@ function directive(cmd, linebuf) //, linenum)
 //macro defs:
         case "undef": //delete macro name
             vm.my_eval(`undef("${linebuf}", "${this.srcline}");`, "#undef"); //runInContext(`undef("${linebuf}", "${this.srcline}");`.echo_stderr("define"), opts.macros, VM_OPTS);
-            return `//'${this.linebuf}' => delete macro '${linebuf}'`.yellow_lt;
+            return "//" + `'${this.linebuf}' => delete macro '${linebuf}'`.yellow_lt;
         case "define": //save for later expansion
             var macname = vm.my_eval(`define("${linebuf}", "${this.srcline}");`, "#def"); //runInContext(`define("${linebuf}", "${this.srcline}");`.echo_stderr("define"), opts.macros, VM_OPTS);
-            return `//'${this.linebuf}' => define macro '${macname}'`.yellow_lt;
+            return "//" + `'${this.linebuf}' => define macro '${macname}'`.yellow_lt;
 //            if (!macro.defs) macro.defs = {};
 //            const DEFINE_xre = XRegExp(`
 //                (?<name>  ${MACRO_NAME} )  \\s*
@@ -685,7 +700,7 @@ function directive(cmd, linebuf) //, linenum)
 //            return; //no output from this line
         case "dump_macros": //list all macros
             vm.my_eval(`dump_macros("${this.srcline}");`, "#dump"); //runInContext(`dump_macros("${this.srcline}");`, opts.macros, VM_OPTS);
-            return `//'${this.linebuf}' => dump macros`.yellow_lt;
+            return "//" + `'${this.linebuf}' => dump macros`.yellow_lt;
 //conditional directives:
         case "ifdef":
         case "ifndef":
@@ -698,7 +713,7 @@ function directive(cmd, linebuf) //, linenum)
 //            var parts = linebuf.match(IFDEF_xre);
             opts.state.push_if(linebuf); //runInContext(linebuf.echo_stderr("#if"), opts.macros, VM_OPTS)); //CAUTION: inverted
 //            warn(`condtional: '${linebuf}' => ${opts.bypass.top}`.yellow_lt);
-            return `//'${this.linebuf}' => push bypass ${opts.state.top.bypass? "ON": "OFF"}, depth ${opts.state.length}`.yellow_lt;
+            return "//"+ `'${this.linebuf}' => push bypass ${opts.state.top.bypass? "ON": "OFF"}, depth is now ${opts.state.length}`.yellow_lt;
         default:
 //            warn(`ignoring unrecognized pre-processor directive '${cmd}' (line ${this.srcline})`);
 //            return linebuf; //leave as-is
@@ -1296,7 +1311,7 @@ function extensions()
     String.prototype.quote = function(quotype) { return quote(this/*.toString()*/, quotype); }
 //    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
 //conflict with prop:    String.prototype.color_reset = function(color) { return color_reset(this.toString(), color); }
-    String.prototype.echo_stderr = function(desc) { console.error(`${desc || "echo_stderr"} ${srcline(1)}`, this/*.toString()*/); return this; }
+    String.prototype.echo_stderr = function(desc, depth) { console.error(`${desc || "echo_stderr"} ${srcline(1 + (depth || 0))}`, this/*.toString()*/); return this; }
 //define parameter-less functions as properties:
     Object.defineProperties(String.prototype,
     {

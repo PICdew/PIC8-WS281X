@@ -8,7 +8,8 @@
 
 
 //#include "pic16x.h"
-#include "pic8-hw.h"
+//#include "pic8-hw.h"
+#warning("put this back in");
 
 #define memlen(type)  (type.last - type.first + 1)
 
