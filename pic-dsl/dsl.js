@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-//DSL-to-Javascript AST streamer
+//DSL-to-Javascript transform stream + AST node emitter
 
 "use strict";
 require("magic-globals"); //__file, __line, __stack, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-const fs = require("fs");
-const vm = require("vm"); //https://nodejs.org/api/vm.html
-const pathlib = require("path"); //NOTE: called it something else to reserve "path" for other var names
-const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
+//const fs = require("fs");
+//const vm = require("vm"); //https://nodejs.org/api/vm.html
+//const pathlib = require("path"); //NOTE: called it something else to reserve "path" for other var names
+//const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
 const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 //TODO? const miss = require("mississippi"); //stream utils
 const {LineStream} = require('byline');
@@ -20,85 +20,7 @@ const thru2 = require("through2"); //https://www.npmjs.com/package/through2
 
 //extensions();
 module.exports.version = "1.0";
-const CWD = ""; //param for pathlib.resolve()
-
-//var ary = [];
-//ary.push("line 1".red_lt);
-//ary.push("line 2");
-//ary.push("line 3".green_lt);
-//console.error("test 1", ary.join("\n"));
-//console.error("test 2", ary.join("\n").cyan_lt);
-//console.error("test 3", ary.join("\n").cyan_lt.color_reset);
-//process.exit(0);
-
-//https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative
-//use negative lookahead instead:   (?<!filename)\.js$   ==>  (?!.*filename\.js$).*\.js$
-//const CommentsNewlines_re = /(?<![\\])#.*\n|\n/g;  //strip comments + newlines in case caller comments out parent line
-//console.error(`test '${quostr("test").replace(/\t/g, "\\t").replace(/\n/g, "\\n")}'`.yellow_lt);
-
-/*
-const xre_test = XRegExp(`
-    ^ \\s*  #start of string (leading white space should already have been skipped)
-    ${quostr("inner")}  #optionally quoted string
-#    (?<quotype1> ['"]) (?<inner> .*) \\k<quotype1>
-    ( \\s* ; )?  #optional trailing ";"
-    \\s* $  #ignore trailing white space
-    `.replace(CommentsNewlines_re, ""), 'xi');
-//console.error("here1".cyan_lt);
-var test = " 'a \"string' ".match(xre_test);
-if (!test) test = {quote: "NOPE", inner: "NOPE"};
-console.error("match1?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#${test.inner}#`);
-test = "\"this is \\\"another 'string'\"".match(xre_test);
-console.error("match2?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#${test.inner}#`);
-//process.exit(0);
-*/
-
-//debugger;
-//console.log(JSON5.stringify(eval("'hi,' + ' there'")));
-//const re_test = XRegExp(`(?<year>[0-9]{4} ) -?  # year
-//          (?<month>[0-9]{2} ) -?  # month
-//          (?<day>[0-9]{2} )     # day`, 'x');
-//const result = "2015-01-02".match(re_test); //XRegExp.exec("2015-01-02", re_test);
-//console.log(`match yr ${result.year}, mon ${result.month}, day ${result.day}, result ${JSON5.stringify(result)}`.blue_lt);
-//console.log(`re ${JSON5.stringify(re_test)}`.blue_lt);
-//process.exit(0);
-
-
-////////////////////////////////////////////////////////////////////////////////
-////
-/// Echo input stream to stderr (for debug):
-//
-
-const echo_stream =
-module.exports.echo_stream =
-function echo_stream(opts)
-{
-    var destfile = opts.filename.unquoted || opts.filename;
-//console.error(typeof destfile, destfile, opts.filename);
-    destfile = destfile && pathlib.basename(destfile, pathlib.extname(destfile));
-    const echostrm = opts.pass && fs.createWriteStream(`${destfile || "stdin"}-${opts.pass}`);
-    return Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {pushline});
-//    const instrm = new PassThrough(); //wrapper end-point
-//    const outstrm = instrm
-//        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
-//        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
-//    return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
-
-    function xform(chunk, enc, cb)
-    {
-        if (isNaN(++this.numlines)) this.numlines = 1;
-        if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
-        if (echostrm) echostrm.write(chunk + "\n");
-        else
-//        {
-//            if (this.numlines == 1) console.error("preproc out:");
-            /*if (opts.echo)*/ console.error(chunk/*.replace(/\n/gm, "\\n")*/.cyan_lt); //this.chunks.join("\n").cyan_lt); //echo to stderr so it doesn't interfere with stdout; drop newlines because console.error will send one anyway
-//        }
-        this.pushline(chunk);
-        cb();
-    }
-    function flush(cb) { cb(); }
-}
+//const CWD = ""; //param for pathlib.resolve()
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1373,7 +1295,7 @@ function CLI(more_opts)
 //    retstrm.emit("dsl-opts", opts);
     return retstrm;
 }
-//                  ____________________________
+//                  _____<____________<_________
 //                 /                            \
 //file or stdin ---\--> macro expand -> REPL ---/----> AST
 

@@ -46,6 +46,8 @@ const Duplex = DuplexStream; //TODO: API is different
 
 //wrapper for real debug function:
 //NOTE: Array.isArray throws on non-objects so use duck typing instead
+const debug =
+module.exports.debug =
 function debug(args)
 {
     if (!debug.nested) throw `debug(): hoisting error`.red_lt;
@@ -118,6 +120,47 @@ function debug_more(args)
 
 extensions();
 module.exports.version = "1.0";
+
+//var ary = [];
+//ary.push("line 1".red_lt);
+//ary.push("line 2");
+//ary.push("line 3".green_lt);
+//console.error("test 1", ary.join("\n"));
+//console.error("test 2", ary.join("\n").cyan_lt);
+//console.error("test 3", ary.join("\n").cyan_lt.color_reset);
+//process.exit(0);
+
+//https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative
+//use negative lookahead instead:   (?<!filename)\.js$   ==>  (?!.*filename\.js$).*\.js$
+//const CommentsNewlines_re = /(?<![\\])#.*\n|\n/g;  //strip comments + newlines in case caller comments out parent line
+//console.error(`test '${quostr("test").replace(/\t/g, "\\t").replace(/\n/g, "\\n")}'`.yellow_lt);
+
+/*
+const xre_test = XRegExp(`
+    ^ \\s*  #start of string (leading white space should already have been skipped)
+    ${quostr("inner")}  #optionally quoted string
+#    (?<quotype1> ['"]) (?<inner> .*) \\k<quotype1>
+    ( \\s* ; )?  #optional trailing ";"
+    \\s* $  #ignore trailing white space
+    `.replace(CommentsNewlines_re, ""), 'xi');
+//console.error("here1".cyan_lt);
+var test = " 'a \"string' ".match(xre_test);
+if (!test) test = {quote: "NOPE", inner: "NOPE"};
+console.error("match1?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#${test.inner}#`);
+test = "\"this is \\\"another 'string'\"".match(xre_test);
+console.error("match2?".cyan_lt, JSON5.stringify(test), `#${test.quotype2}#`, `#${test.inner}#`);
+//process.exit(0);
+*/
+
+//debugger;
+//console.log(JSON5.stringify(eval("'hi,' + ' there'")));
+//const re_test = XRegExp(`(?<year>[0-9]{4} ) -?  # year
+//          (?<month>[0-9]{2} ) -?  # month
+//          (?<day>[0-9]{2} )     # day`, 'x');
+//const result = "2015-01-02".match(re_test); //XRegExp.exec("2015-01-02", re_test);
+//console.log(`match yr ${result.year}, mon ${result.month}, day ${result.day}, result ${JSON5.stringify(result)}`.blue_lt);
+//console.log(`re ${JSON5.stringify(re_test)}`.blue_lt);
+//process.exit(0);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -868,7 +911,7 @@ function dump_macros(where)
     {
         console.error(`${inx}/${all.length}. '${key}'(${Object.keys(macros[key].args_xre || {}).join(",") || "no params"}) ${macros[key].body || "no body"}`.cyan_lt);
     });
-    debug(`macro performance: ${expand_macros.calls} calls (${Math.round(expand_macros.perf_time / expand_macros.calls)} nsec avg), ${expand_macros.body_substs} body expansions (${pct(expand_macros.body_substs, expand_macros.calls)}%), ${expand_macros.arg_substs} arg expansions`.cyan_lt);
+    debug(`macro performance: ${expand_macros.calls} calls (${Math.round(expand_macros.perf_time / expand_macros.calls / 100) / 10} usec avg), ${expand_macros.body_substs} body expansions (${pct(expand_macros.body_substs, expand_macros.calls)}%), ${expand_macros.arg_substs} arg expansions`.cyan_lt);
 //    return !!macros[name];
 }
 
@@ -1385,6 +1428,7 @@ function CLI(opts)
     const files = []; //source files to process (in order)
 //    debug.buffered = true; //collect output until debug option is decided (options can be in any order)
     const startup_code = [];
+    const downstream_args = [];
 //    process.argv_unused = {};
     for (var i = 0; i < process.argv.length; ++i)
         ((i == 2)? shebang_args(process.argv[i]): [process.argv[i]]).forEach((arg, inx, all) => //shebang might also have args (need to split and strip comments)
@@ -1404,6 +1448,7 @@ function CLI(opts)
                 )?
             `.anchorRE, "x");
 //debug(debug_out.join_flush("\n"));
+            downstream_args.push(arg);
             const parts = arg.unquoescaped.match(OPTION_xre) || {name: arg.unquoescaped};
 //            debug(parts.name, parts.value);
 //            if (!parts /*|| ((parts.onoff == "+") && (parts.value !== undefined))*/) { debug_out.push("INVALID\n".red_lt); unused(argdesc, arg); return error(`invalid option in ${argdesc}: '${arg}'`); }
@@ -1428,8 +1473,10 @@ function CLI(opts)
                     break;
                 case "filename":
                     if (!files.length) opts.outfilename = parts.value; //assume first file is main
+                    startup_code.top = `#include "${filename}"`;
                     files.push(parts.value);
                     debug.more("FILE".blue_lt);
+                    downstream_args.pop(); //don't pass this one along
                     break;
 //see case regex idea from: https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&cad=rja&uact=8&ved=2ahUKEwjwy5qeqLTdAhVF2VMKHWnYC74QFjAAegQIAxAB&url=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F2896626%2Fswitch-statement-for-string-matching-in-javascript&usg=AOvVaw2-zByz2vpbiILX3nCtu5xT
 //                case parts.name.match(/^U/) && parts.name: startup_code.push(`#undef ${parts.name.substr(1)}`); break; //undef(parts.name); break;
@@ -1437,9 +1484,10 @@ function CLI(opts)
                     const Directives = {D: "#define", U: "#undef"}; //cmd line arg => #directive
                     startup_code.top = `${Directives[parts.name[0]]} ${parts.name.substr(1)}  ${parts.value || ""}`; //define(parts.name, parts.value); break;
                     debug.more("MACRO".blue_lt);
+                    downstream_args.pop(); //don't pass this one along
                     break;
                 default:
-                    unused(argdesc, arg);
+//                    unused(argdesc, arg);
                     debug.more("UNUSED".blue_lt);
             }
         });
@@ -1452,7 +1500,7 @@ function CLI(opts)
     debug.enabled = opts.debug; //flush or discard now that caller's intention is known
 //#!./prexproc.js ./pic8-dsl.js +debug \#not-a-comment "arg with space" +preproc -DX  -UX  -DX=4  -DX="a b" +echo +ast -run -reduce -codegen  #comment out this line for use with .load in Node.js REPL
     debug(`${__file}: ${files.length} source file${files.plurals()} to process ...`.green_lt, files.join(", "));
-    if (!files.length) files.push("-"); //read from stdin if no other input files specified
+    if (!files.length) startup_code.push("#include -"); //files.push("-"); //read from stdin if no other input files specified
 //    if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
 //    files.index = 0;
 //    var regurge = [];
@@ -1473,8 +1521,8 @@ function CLI(opts)
         next(strm);
     });
 */
-    debug("unused args:".yellow_lt, Object.keys(process.argv_unused || {}).map((key) => { return process.argv_unused[key]; }).join(", "));
-    files.forEach((filename) => { startup_code.push(`#include "${filename}"`); });
+//    debug("unused args:".yellow_lt, Object.keys(process.argv_unused || {}).map((key) => { return process.argv_unused[key]; }).join(", "));
+//    files.forEach((filename) => { startup_code.push(`#include "${filename}"`); });
 //    const instrm = str2strm(`${startup_code.join("\n").echo_stderr("startup code:")}`);
 //    debug(`preproc: reading from ${opts.filename || "stdin"} ...`.green_lt);
 //    const instrm = Readable({highWaterMark});
@@ -1482,6 +1530,7 @@ function CLI(opts)
 //    const retstrm =
 //    return instrm
     opts.infilename = `${__file}-cmdline`; //"startup_code";
+    process.argv = downstream_args;
     return str2strm(startup_code.join("\n"))
 //        .pipe(echo_stream(opts))
         .pipe(regexproc(opts)) //: new PassThrough())
@@ -1500,12 +1549,11 @@ function CLI(opts)
 //        CaptureConsole.stopCapture(process.stdout);
         debug(`${__file} stream: ${desc || "eof"}`.green_lt);
     }
-
-    function unused(desc, val)
-    {
-        if (!process.argv_unused) process.argv_unused = {};
-        process.argv_unused[desc] = val;
-    }
+//    function unused(desc, val)
+//    {
+//        process.argv_unused = process.argv_unused || {};
+//        process.argv_unused[desc] = val;
+//    }
 }
 
 if (!module.parent) CLI().pipe(process.stdout); //auto-run CLI, generated output to console
