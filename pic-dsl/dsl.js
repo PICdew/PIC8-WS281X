@@ -1206,9 +1206,9 @@ const DEFAULT_OPTS =
     codegen: true, //generate code (emit ast events)
 };
 
-const myCLI =
+const dsl_CLI =
 module.exports.CLI =
-function myCLI(more_opts)
+function dsl_CLI(more_opts)
 {
 //console.error("args<-", JSON5.stringify(process.argv));
 //    const RequireFromString = require('require-from-string');
@@ -1318,6 +1318,6 @@ console.error(typeof retstrm);
 //                 /                            \
 //file or stdin ---\--> macro expand -> REPL ---/----> AST
 
-if (!module.parent) myCLI(); //auto-run CLI
+if (!module.parent) dsl_CLI().pipe(process.stdout); //auto-run CLI, generated output to console
 
 //eof

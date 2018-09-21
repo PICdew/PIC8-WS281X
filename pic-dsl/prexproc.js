@@ -1426,9 +1426,9 @@ function extensions()
 
 module.exports.version = "1.0";
 
-const CLI =
+const regexproc_CLI =
 module.exports.CLI =
-function CLI(opts)
+function regexproc_CLI(opts)
 {
     const CWD = ""; //param for pathlib.resolve()
     opts = opts || {};
@@ -1569,6 +1569,6 @@ function CLI(opts)
 //    }
 }
 
-if (!module.parent) CLI().pipe(process.stdout); //auto-run CLI, generated output to console
+if (!module.parent) regexproc_CLI().pipe(process.stdout); //auto-run CLI, generated output to console
 
 //eof

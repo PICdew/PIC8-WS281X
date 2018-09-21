@@ -148,9 +148,9 @@ const my_opts =
 //    traverse: process_ast,
 };
 
-const my_CLI =
+const pic8_CLI =
 module.exports.CLI =
-function my_CLI(opts)
+function pic8_CLI(opts)
 {
     const state = {};
 //    opts = opts || {};
@@ -166,6 +166,6 @@ function my_CLI(opts)
 //    return retval
 }
 
-if (!module.parent) my_CLI(); //auto-run CLI
+if (!module.parent) pic8_CLI().pipe(process.stdout); //auto-run CLI, generated output to console
 
 //eof
