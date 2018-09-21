@@ -7,7 +7,7 @@ require("colors").enabled = true; //for console output; https://github.com/Marak
 //const fs = require("fs");
 //const vm = require("vm"); //https://nodejs.org/api/vm.html
 //const pathlib = require("path"); //NOTE: called it something else to reserve "path" for other var names
-//const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
+const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
 const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 //TODO? const miss = require("mississippi"); //stream utils
 const {LineStream} = require('byline');
@@ -16,10 +16,12 @@ const DuplexStream = require("duplex-stream"); //https://github.com/samcday/node
 const Duplex = DuplexStream; //TODO: API is different
 const {/*Readable, Writable, Duplex,*/ PassThrough} = require("stream");
 const thru2 = require("through2"); //https://www.npmjs.com/package/through2
-//const preproc = require("./preproc");
+const {error, warn, debug, echo_stream, CLI /*, regexproc, date2str*/} = require("./prexproc");
 
 //extensions();
 module.exports.version = "1.0";
+Object.assign(module.exports, {debug, warn, error}); //expose to caller
+
 //const CWD = ""; //param for pathlib.resolve()
 
 
@@ -44,7 +46,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 {
     const instrm = new PassThrough(); //end-point wrapper
     const outstrm = instrm
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "dsl2js-in.txt"}, opts)): new PassThrough())
+        .pipe(opts.echo? echo_stream(Object.assign({filename: "dsl2js-in" || `${__file}-in`}, opts)): new PassThrough())
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
         .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
@@ -137,7 +139,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            console.error(`arg[${a}/${process.argv.length}]: '${process.argv[a]}'`.blue_lt);
 //    }
     const outstrm = instrm
-        .pipe(opts.echo? echo_stream(Object.assign({pass: "js2ast-in.txt"}, opts)): new PassThrough())
+        .pipe(opts.echo? echo_stream(Object.assign({filename: "js2ast-in" || `${__file}-in`}, opts)): new PassThrough())
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
         .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //collect and compile code
@@ -404,7 +406,8 @@ function walkAST(opts) //{}
 */
 
 
-//coalesce compile-time constants, drop run-time functions:
+//optimization:
+//coalesce compile-time constants, drop run-time functions, etc.
 //NOTE: this is an optional pass; caller can disable
 function reduce(ast_node, parent) //, symtab)
 {
@@ -836,13 +839,13 @@ function debug_node(node_data)
 
 
 //NOTE: hard-coded date/time fmt
-const date2str =
-module.exports.date2str =
-function date2str(when)
-{
-    if (!when) when = new Date(); //when ||= new Date(); //Date.now();
-    return `${when.getMonth() + 1}/${when.getDate()}/${when.getFullYear()} ${when.getHours()}:${nn(when.getMinutes())}:${nn(when.getSeconds())}`;
-}
+//const date2str =
+//module.exports.date2str =
+//function date2str(when)
+//{
+//    if (!when) when = new Date(); //when ||= new Date(); //Date.now();
+//    return `${when.getMonth() + 1}/${when.getDate()}/${when.getFullYear()} ${when.getHours()}:${nn(when.getMinutes())}:${nn(when.getSeconds())}`;
+//}
 
 
 //remove comment:
@@ -856,12 +859,13 @@ function date2str(when)
 
 //const nn =
 //module.exports.nn =
-function nn(val) { return (val < 10)? "0" + val: val; }
+//function nn(val) { return (val < 10)? "0" + val: val; }
 
 
 //regexp fragment for quoted string:
 //handles embedded escaped quotes
 //based on https://www.metaltoad.com/blog/regex-quoted-string-escapable-quotes
+/*
 function quostr(name)
 {
 //https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative
@@ -887,6 +891,7 @@ function quostr(name)
 #        \\s*  #skip trailing white space
         `.spaceRE.replace(CommentsNewlines_re, ""); //strip comments + newlines in case caller comments out parent line; //.replace(/\\/g, "\\\\"); //NO-re-esc for inclusion into parent string
 }
+*/
 
 
 //check for quoted string:
@@ -902,21 +907,22 @@ function quostr(name)
 //}
 
 //add anchors around RE string:
-function anchorRE(str) { return `^${str || ""}$`; }
+//function anchorRE(str) { return `^${str || ""}$`; }
 
 //add white space around RE string:
-function spaceRE(str) { return `\\s*${str || ""}\\s*`; }
+//function spaceRE(str) { return `\\s*${str || ""}\\s*`; }
 
 
 //strip quotes from a string:
 //NOTE: returns null if not quoted
+/*
 function unquote(str)
 {
 //    const QUOTE_xre = XRegExp(`
 //        (?<quotype> ['"] )
 //        (?<inner> .* )
 //        \\k<quotype>  #string must begin and end with same quote type
-//    `/*.spaceRE*/.anchorRE, "x");
+//    `/-*.spaceRE*-/.anchorRE, "x");
     const QUOTE_xre = XRegExp(`${quostr("inner")}`.anchorRE, "x");
 //    if (!str.match(QUOTE_xre)) throw `"${str || ""}" is not quoted`.red_lt;
 //    return XRegExp.replace(str || "", QUOTE_xre, "$<inner>");
@@ -977,7 +983,7 @@ function nocolors(str)
 function color_reset(str, color)
 {
 //return str || "";
-/*
+/-*
     const COLORS_xre = XRegExp(`
         \\x1B  #ASCII Escape char
         \\[  (?<code> (\\d | ;)+ )  m
@@ -997,7 +1003,7 @@ function color_reset(str, color)
 //    return (str || "").replace(ENDCOLOR_re, color || init_color || "\x1B[0m");
     color = color || ((str || "").match(ANYCOLOR_xre) || [])[0]; //extract first color code from start of string
     return color? (str || "").replace(NOCOLOR_xre, color): str; //set color back to first color instead of no color
-*/
+*-/
     const FIRSTCOLOR_xre = XRegExp(`
         ^  #at start of string
         (?<escseq>
@@ -1011,7 +1017,7 @@ function color_reset(str, color)
         ( $ | (?<color_start>  \\x1B \\[ \\d+ ; \\d+ m ))  #end or before next color
         `, "xgm"); //match start/end of line as well as string; //`tput sgr0` #from http://stackoverflow.com/questions/5947742/how-to-change-the-output-color-of-echo-in-linux
 //    var first, last;
-/*
+/-*
     var uncolored = []; //(ofs, len) pairs where string has no color
     XRegExp.forEach(str || "", UNCOLORED_xre, (match, inx) => 
     {
@@ -1021,7 +1027,7 @@ function color_reset(str, color)
         if (match.substr.length) uncolored.push({ofs: match.index, len: match.substr.length, });
     });
     console.error(`areas not colored: ${JSON5.stringify(uncolored)}`);
-*/
+*-/
 //    var matches = (str || "").match(COLORS_xre);
 //    console.error(JSON5.stringify(matches, null, "  "));
     color = ((color || str || "").match(FIRSTCOLOR_xre) || {}).escseq; //extract first color from start if caller didn't specify
@@ -1032,10 +1038,12 @@ function color_reset(str, color)
         return `${color}${match.substr}${match.color_start || "\x1B[0m"}`; //replace all color ends with new color; reset color at end of line
     }): str; //set color back to first color instead of no color
 }
+*/
 
 
 //return "file:line#":
 //mainly for debug or warning/error messages
+/*
 function srcline(level)
 {
     const want_path = (level < 0);
@@ -1043,6 +1051,7 @@ function srcline(level)
 //console.error(`filename ${frame.getFileName()}`);
     return `${(want_path? nop: pathlib.basename)(frame.getFileName().unquoted || frame.getFileName(), ".js")}:${frame.getLineNumber()}`.underline;
 }
+*/
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -1050,6 +1059,10 @@ function srcline(level)
 /// Misc helper functions/exports:
 //
 
+function numkeys(thing) { return Object.keys(thing || {}).length; }
+
+
+/*
 const error =
 module.exports.error =
 function error(msg)
@@ -1073,9 +1086,6 @@ function warn(msg)
 //    try { return eval(expr); }
 //    catch (exc) { return `ERROR: ${exc} on '${expr}'`; }
 //}
-
-
-function numkeys(thing) { return Object.keys(thing || {}).length; }
 
 
 //split shebang string into separate args:
@@ -1145,21 +1155,21 @@ function extensions()
     String.prototype.match = function(xre) { return XRegExp.exec(this, xre); }; //console.error("is xregexp? " + XRegExp.isRegExp(re)); return XRegExp.exec(this, re); } //XRegExp.isRegExp(re)? XRegExp.exec(this.toString(), re): this.sv_match(re); }
     String.prototype.replace = function(xre, newstr) { return XRegExp.replace(this, xre, newstr); };
 //    console.log(String.prototype.match.toString());
-    String.prototype.quote = function(quotype) { return quote(this/*.toString()*/, quotype); }
-    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
+    String.prototype.quote = function(quotype) { return quote(this/-*.toString()*-/, quotype); }
+    String.prototype.unquote = function(quotype) { return unquote(this/-*.toString()*-/, quotype); }
 //conflict with prop:    String.prototype.color_reset = function(color) { return color_reset(this.toString(), color); }
-    String.prototype.echo_stderr = function(desc) { console.error(`${desc || "echo_stderr"} @${srcline(1)}`, this/*.toString()*/); return this; }
+    String.prototype.echo_stderr = function(desc) { console.error(`${desc || "echo_stderr"} @${srcline(1)}`, this/-*.toString()*-/); return this; }
     Object.defineProperties(String.prototype,
     {
-        quoted: { get() { return quote(this/*.toString()*/); }, },
-        quoted1: { get() { return quote(this/*.toString()*/, "'"); }, },
-        unquoted: { get() { return unquote(this/*.toString()*/); }, },
-        unparen: { get() { return unparen(this/*.toString()*/); }, },
+    quoted: { get() { return quote(this/-*.toString()*-/); }, },
+        quoted1: { get() { return quote(this/-*.toString()*-/, "'"); }, },
+unquoted: { get() { return unquote(this/-*.toString()*-/); }, },
+unparen: { get() { return unparen(this/-*.toString()*-/); }, },
         unindent: { get() { return unindent(this); }, },
-        anchorRE: { get() { return anchorRE(this/*.toString()*/); }, },
-        spaceRE: { get() { return spaceRE(this/*.toString()*/); }, },
-        color_reset: { get() { return color_reset(this/*.toString()*/); }, },
-        nocolors: { get() { return nocolors(this/*.toString()*/); }, },
+anchorRE: { get() { return anchorRE(this/-*.toString()*-/); }, },
+spaceRE: { get() { return spaceRE(this/-*.toString()*-/); }, },
+color_reset: { get() { return color_reset(this/-*.toString()*-/); }, },
+nocolors: { get() { return nocolors(this/-*.toString()*-/); }, },
 //        echo_stderr: { get() { console.error("echo_stderr:", this.toString()); return this; }, },
     });
 //unit tests:
@@ -1173,6 +1183,7 @@ function extensions()
     console.error(["leader".blue_lt, "intro", "red".red_lt, "more", "green".green_lt].join(" ").color_reset, "hello");
     process.exit(0);
 }
+*/
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -1195,10 +1206,11 @@ const DEFAULT_OPTS =
     codegen: true, //generate code (emit ast events)
 };
 
-const CLI =
+const myCLI =
 module.exports.CLI =
-function CLI(more_opts)
+function myCLI(more_opts)
 {
+//console.error("args<-", JSON5.stringify(process.argv));
 //    const RequireFromString = require('require-from-string');
 //    const Collect = require("collect-strean");
 //    const {LineStream} = require('byline');
@@ -1221,45 +1233,51 @@ function CLI(more_opts)
                 return true; //asst successful
             },
         });
-    const debug_out = []; //collect output until debug option is decided (options can be in any order)
-    for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
-        shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
-        {
-            const argname = `arg[${i}/${process.argv.length}${(all.length != 1)? `,${inx}/${all.length}`: ""}]`;
-            debug_out.push(`${argname}: '${arg}' => `);
-            if (i < 2) { debug_out.last += "SKIP"; return; } //skip node + script file names
-//            var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
-            const OPTION_xre = XRegExp(`
-                (?<onoff> [+-] )?  #allow turn on/off (allows caller to override defaults)
-                (?<name> [^=]+ )  #name of option
-                (
-                    =  #assign non-boolean value (optional)
-                    (?<value> .* )
-                )?
-            `.anchorRE, "x");
-            var parts = arg.match(OPTION_xre);
-            if (!parts || (parts.onoff && parts.value)) { debug.last += "INVALID".red_lt; return error(`invalid option in ${argname}: '${arg}'`); }
-            if (!parts.onoff && !parts.value) parts = {name: "filename", value: (parts.name.unquoted || parts.name).quoted1, }; //treat stand-alone value as filename; strip optional quotes and then re-add
-            opts[parts.name.toLowerCase()] = parts.onoff? (parts.onoff == "+"): parts.value;
-            if (opts.changes[parts.name.toLowerCase()] > 1) //option was already specified
-            {
-                warn(`${argname} '${arg}' overrides prior option value`);
-                debug_out.last += "OVERRIDE ".yellow_lt;
-            }
-            debug_out.last += `${parts.name} = ${opts[parts.name.toLowerCase()]}`.cyan_lt;
-        });
-//    console.log(JSON.stringify(opts, null, "  "));
-    Object.keys(opts).forEach((key) =>
-    {
-        if (key.toLowerCase() in opts.changes) return;
-        debug_out.push(`default option: ${`${key} = ${opts[key]}`.cyan_lt}`); //show default options also
-    });
-    if (opts.debug) console.error(debug_out.join("\n").blue_lt.color_reset);
-    if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
-    console.error(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
-    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename.unquoted): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
+//    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename.unquoted): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
+//    const retstrm =
+//        instrm
     const retstrm =
-        instrm
+        CLI(opts)
+        .on("args", (argv) =>
+        {
+            /*process.*/argv.forEach((arg, i, all) =>
+            {
+                const /*arg = process.argv[i],*/ argname = `arg[${i}/${process.argv.length}]`;
+                debug(`${argname}: '${arg}' => `.blue_lt);
+                if (i < 2) { debug.more("SKIP".blue_lt); return; } //skip node + script file names
+        //            var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
+                const OPTION_xre = XRegExp(`
+                    (?<onoff> [+-] )?  #allow turn on/off (allows caller to override defaults)
+                    (?<name> [^=]+ )  #name of option
+                    (
+                        =  #assign non-boolean value (optional)
+                        (?<value> .* )
+                    )?
+                `.anchorRE, "x");
+                var parts = arg.match(OPTION_xre);
+                if (!parts || (parts.onoff && parts.value)) { debug.more("INVALID".red_lt); return error(`invalid option in ${argname}: '${arg}'`); }
+                if (!parts.onoff && !parts.value) parts = {name: "filename", value: (parts.name.unquoted || parts.name).quoted1, }; //treat stand-alone value as filename; strip optional quotes and then re-add
+                opts[parts.name.toLowerCase()] = parts.onoff? (parts.onoff == "+"): parts.value;
+                if (opts.changes[parts.name.toLowerCase()] > 1) //option was already specified
+                {
+                    warn(`${argname} '${arg}' overrides prior option value`);
+                    debug.more("OVERRIDE ".yellow_lt);
+                }
+                debug.more(`${parts.name} = ${opts[parts.name.toLowerCase()]}`.cyan_lt);
+            });
+//    const debug_out = []; //collect output until debug option is decided (options can be in any order)
+//    for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
+//        shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
+//    console.log(JSON.stringify(opts, null, "  "));
+            Object.keys(opts).forEach((key) =>
+            {
+                if (key.toLowerCase() in opts.changes) return;
+                debug(`default option: ${`${key} = ${opts[key]}`.cyan_lt}`); //show default options also
+            });
+//    if (opts.debug) console.error(debug_out.join("\n").blue_lt.color_reset);
+            if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
+            console.error(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
+        })
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
@@ -1293,12 +1311,13 @@ function CLI(more_opts)
         });
     console.error("DSL engine: finish asynchronously".green_lt);
 //    retstrm.emit("dsl-opts", opts);
+console.error(typeof retstrm);
     return retstrm;
 }
 //                  _____<____________<_________
 //                 /                            \
 //file or stdin ---\--> macro expand -> REPL ---/----> AST
 
-if (!module.parent) CLI(); //auto-run CLI
+if (!module.parent) myCLI(); //auto-run CLI
 
 //eof

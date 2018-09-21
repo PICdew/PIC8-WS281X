@@ -250,7 +250,7 @@ const shebang_args =
 module.exports.shebang_args =
 function shebang_args(str)
 {
-    debug(`shebang args getting from: ${str}`.blue_lt);
+    debug(`shebang args from: ${str}`.blue_lt);
 /*
     const COMMENT_xre = XRegExp(`
         \\s*  #skip white space
@@ -589,6 +589,7 @@ if (false)            this.pause(); //no-; pause flow of input stream until nest
 if (false)        this.resume(); //no-; continue flow from input stream
 //        if ((opts.bypass || []).length) error(`unterminated #if on line ${this.srcline}`);
         this.opts.file_stack.pop();
+debug(`@nested eof: #nif ${this.opts.nif_stack.length}, #file ${this.opts.file_stack.length}`);
         cb();
     }
 }
@@ -603,6 +604,7 @@ function preproc_flush(cb)
 //        if (!this.chunks) this.chunks = [];
 //    if (opts.bypass.length != (opts.bypass_startlen || 0))
 //already done!    opts.file_stack.pop();
+debug(`@flush: nif ${JSON5.stringify(opts.nif_stack)}, file ${JSON5.stringify(opts.file_stack)}`);
     if (opts.nif_stack.length != (opts.file_state.depth || 0)) error(`${opts.nif_stack.length - (opts.file_state.depth || 0)} unterminated #if level(s) on line ${this.srcline}`);
     if (this.linebuf)
     {
@@ -1290,7 +1292,7 @@ function warn(msg)
 //}
 
 
-function numkeys(thing) { return Object.keys(thing || {}).length; }
+//function numkeys(thing) { return Object.keys(thing || {}).length; }
 
 
 function pct(num, den)
@@ -1299,10 +1301,10 @@ function pct(num, den)
 }
 
 //convert array to dictionary (for faster lookups):
-function ary2dict(ary)
-{
-    return (ary || []).reduce((list, op) => { list[op] = true; return list; }, {});
-}
+//function ary2dict(ary)
+//{
+//    return (ary || []).reduce((list, op) => { list[op] = true; return list; }, {});
+//}
 
 //function str_trim(str) //trim quotes and trailing semi-colon; NOTE: assumes only 1 param
 //{
@@ -1318,6 +1320,13 @@ function pushline(str)
 {
     /*if (str)*/ this.push(`${str || ""}\n`); //maintain correct line#
 }
+
+function emit_fluent(evt, data)
+{
+    this.emit(evt, data);
+    return this; //fluent
+}
+
 
 //safely evaluate a string expr:
 //for warnings about eval(), see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
@@ -1357,6 +1366,8 @@ function extensions()
     });
 //process:
     process.hrtime.bigint = function() { var [sec, nsec] = process.hrtime(); return sec * 1e9 + nsec; }
+//streams:
+    Duplex.prototype.emit_fluent = function(evt, data) { this.emit(evt, data); return this; }
 //JSON:
     JSON5.sv_stringify = JSON5.stringify;
     JSON5.stringify = function(args)
@@ -1433,6 +1444,7 @@ function CLI(opts)
     for (var i = 0; i < process.argv.length; ++i)
         ((i == 2)? shebang_args(process.argv[i]): [process.argv[i]]).forEach((arg, inx, all) => //shebang might also have args (need to split and strip comments)
         {
+            downstream_args.push(arg);
             const argdesc = `arg[${i}/${process.argv.length}${(all.length != 1)? `, #!${inx}/${all.length}`: ""}]`;
             debug(`${argdesc}: '${(i == 1)? pathlib.relative(CWD, arg): arg}' =>`.blue_lt);
             if (i < 2) { debug.more("SKIP".blue_lt); return; } //skip node + script file names
@@ -1448,7 +1460,6 @@ function CLI(opts)
                 )?
             `.anchorRE, "x");
 //debug(debug_out.join_flush("\n"));
-            downstream_args.push(arg);
             const parts = arg.unquoescaped.match(OPTION_xre) || {name: arg.unquoescaped};
 //            debug(parts.name, parts.value);
 //            if (!parts /*|| ((parts.onoff == "+") && (parts.value !== undefined))*/) { debug_out.push("INVALID\n".red_lt); unused(argdesc, arg); return error(`invalid option in ${argdesc}: '${arg}'`); }
@@ -1473,7 +1484,7 @@ function CLI(opts)
                     break;
                 case "filename":
                     if (!files.length) opts.outfilename = parts.value; //assume first file is main
-                    startup_code.top = `#include "${filename}"`;
+                    startup_code.top = `#include "${parts.value}"`;
                     files.push(parts.value);
                     debug.more("FILE".blue_lt);
                     downstream_args.pop(); //don't pass this one along
@@ -1530,7 +1541,8 @@ function CLI(opts)
 //    const retstrm =
 //    return instrm
     opts.infilename = `${__file}-cmdline`; //"startup_code";
-    process.argv = downstream_args;
+//    process.argv = downstream_args;
+//console.error("args->", JSON5.stringify(process.argv));
     return str2strm(startup_code.join("\n"))
 //        .pipe(echo_stream(opts))
         .pipe(regexproc(opts)) //: new PassThrough())
@@ -1539,7 +1551,8 @@ function CLI(opts)
         .on("close", () => { eof("close"); })
         .on("done", () => { eof("done"); })
         .on("end", () => { eof("end"); })
-        .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); });
+        .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); })
+        .emit_fluent("args", downstream_args);
 //    debug("preproc: finish asynchronously".green_lt);
 //    retstrm.emit("dsl-opts", opts);
 //    return retstrm;

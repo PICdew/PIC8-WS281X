@@ -4,7 +4,8 @@
 "use strict";
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 const JSON5 = require("json5");
-const {CLI, AstNode} = require("./dsl.js");
+const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
+//console.error("CLI", typeof CLI, CLI);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -161,6 +162,8 @@ function my_CLI(opts)
 //            (data.children || []).forEach((key) => { key = key.replace("[]", ""); if (data[key]) data[key] = key.toUpperCase(); });
 //            console.log(JSON5.stringify(data).cyan_lt);
 //        });
+//console.error(typeof retval);
+//    return retval
 }
 
 if (!module.parent) my_CLI(); //auto-run CLI
