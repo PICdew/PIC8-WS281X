@@ -3,7 +3,7 @@
 
 "use strict";
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-const JSON5 = require("json5");
+//const JSON5 = require("json5");
 const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
 //console.error("CLI", typeof CLI, CLI);
 
@@ -17,7 +17,7 @@ const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
 function process_node(ast_node, state, opts)
 {
 //    opts = process_node.opts; //kludge; get from caller
-    if (opts.no_codegen) return;
+    if (opts.no_codegen) return false; //not interested
 //    if (!ast_node) return;
     switch (ast_node.type)
     {
@@ -35,6 +35,7 @@ function process_node(ast_node, state, opts)
 //            traverse(ast_node.right, symtab);
 //            break;
         case "BlockStatement": //{type, body[]}
+        case "ClassBody": //{type, body[]
 //            (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, symtab); });
 //            break;
         case "ExpressionStatement": //{type, expression{}}
@@ -52,6 +53,7 @@ function process_node(ast_node, state, opts)
 //            traverse(ast_node.body, locals);
 //            break;
         case "IfStatement": //{type, test{}, consequent{}, alternate{}}
+        case "ConditionalExpression": //{type, test{}, consequent{}, alternate{}}
 //            traverse(ast_node.test, symtab);
 //            traverse(ast_node.consequent, symtab);
 //            traverse(ast_node.alternate, symtab);
@@ -61,6 +63,8 @@ function process_node(ast_node, state, opts)
 //            traverse(ast_node.test, symtab);
 //            traverse(ast_node.update, symtab);
 //            traverse(ast_node.body, symtab);
+//            break;
+        case "ForInStatement": //{type, left{}, right{}, body{}}
 //            break;
         case "WhileStatement": //{type, test{}, body{}}
 //            traverse(ast_node.test, symtab);
@@ -74,6 +78,10 @@ function process_node(ast_node, state, opts)
 //            traverse(ast_node.argument, symtab);
 //            break;
 //////////////
+        case "MethodDefinition": //{type, key{}, computed, value{}}
+//            break;
+        case "ClassDeclaration": //{type, id{}, superClass{}, body{}}
+//            break;
         case "VariableDeclaration": //{type, declarations[], kind}
 //            (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(dcl, symtab); });
 //            break;
@@ -87,6 +95,7 @@ function process_node(ast_node, state, opts)
         case "ThrowStatement": //{type, argument{}}
         case "ReturnStatement": //{type, argument{}}
         case "ThisExpression": //{type}
+        case "Super": //{type}
 //            traverse(ast_node.argument, symtab);
 //            break;
         case "NewExpression": //{type, callee{}, arguments[]}
@@ -116,23 +125,31 @@ function process_node(ast_node, state, opts)
         case "EmptyStatement": //{type}
         case "Literal" : //{type, value, raw}
 //            break;
-            return; //quietly ignore these ones
+            return true; //quietly ignore ast node, but continue processing
         default: //for debug
-            throw `PIC8-DSL node evt: unhandled node type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
+            /*throw*/ error(`PIC8-DSL node evt: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
     if (opts.debug)
     {
-        const node = AstNode(ast_node);
-        Object.keys(node).forEach((key) =>
-        {
-            if (typeof node[key] == "object") //node[key] = "[object]";
-                for (var k in node[key])
-                    if (typeof node[key][k] == "object") node[key][k] = `[${k.toUpperCase()}]`;
+//no        const node = AstNode(ast_node);
+//        Object.keys(node).forEach((key) =>
+//        {
+//            if (typeof node[key] == "object") //node[key] = "[object]";
+//                for (var k in node[key])
+//no; don't change node data                    if (typeof node[key][k] == "object") node[key][k] = `[${k.toUpperCase()}]`;
 //                    else if()
-        }); //reduce clutter
-        console.error(JSON5.stringify(node).blue_lt);
+//        }); //reduce clutter
+        function show_object_placeholder(key, value)
+        {
+            return (typeof value != "object")? value:
+                (key == "id")? `[${value.name || "ID"}]`:
+                key? `[${key.toUpperCase()}]`:
+                value;
+        }
+        debug("PIC8", `parent ${(ast_node.parent || {}).type}`.blue_lt, JSON.stringify(ast_node, show_object_placeholder).blue_lt);
     }
 //    return ast_node;
+    return true; //continue processing
 }
 
 
@@ -156,7 +173,7 @@ function pic8_CLI(opts)
 //    opts = opts || {};
     return CLI(Object.assign({}, my_opts, opts || {})) //caller opts override my defaults
 //        .on("dsl-opts", (opts) => { console.log(JSON5.stringify(opts).green_lt); my_CLI.save_opts = opts; })
-        .on("ast-node", (node_data) => { process_node(node_data, state, CLI.opts); }); //my_CLI.save_opts); });
+        .on("ast-node", (node_data_wrapper) => { node_data_wrapper.wanted = process_node(node_data_wrapper.ast_node, state, CLI.opts); }); //my_CLI.save_opts); });
 //        {
 //            if (!opts.codegen) return;
 //            (data.children || []).forEach((key) => { key = key.replace("[]", ""); if (data[key]) data[key] = key.toUpperCase(); });

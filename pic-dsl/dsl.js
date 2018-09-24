@@ -4,11 +4,11 @@
 "use strict";
 require("magic-globals"); //__file, __line, __stack, __func, etc
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-//const fs = require("fs");
+const fs = require("fs");
 //const vm = require("vm"); //https://nodejs.org/api/vm.html
 //const pathlib = require("path"); //NOTE: called it something else to reserve "path" for other var names
 const XRegExp = require("xregexp"); //https://github.com/slevithan/xregexp
-const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
+//const JSON5 = require("json5"); //more reader-friendly JSON; https://github.com/json5/json5
 //TODO? const miss = require("mississippi"); //stream utils
 const {LineStream} = require('byline');
 //streams see also https://medium.freecodecamp.org/node-js-streams-everything-you-need-to-know-c9141306be93
@@ -49,7 +49,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         .pipe(opts.echo? echo_stream(Object.assign({filename: "dsl2js-in" || `${__file}-in`}, opts)): new PassThrough())
         .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug and correct #directive handling)
 //        .pipe(preproc())
-        .pipe(thru2(/*{objectMode: false},*/ xform, flush)); //syntax fixups
+        .pipe(Object.assign(thru2(/*{objectMode: false},*/ xform, flush), {opts, pushline, })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
 //        .pipe(Object.assign(thru2(/*{objectMode: false},*/ xform, flush)), {wrapper}) //syntax fixups
     return new Duplex(outstrm, instrm); //return endpts for more pipelining; CAUTION: swap in + out
 
@@ -60,7 +60,7 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
         leader.call(this); //this.wrapper();
-        if (chunk.length) this.push(chunk); //.nocolors); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
+        if (chunk.length) this.pushline(chunk); //.nocolors); //`${linebuf} //${this.linebuf.length}:line ${this.linenum}`); //+ "\n"); //chunk); //re-add newline to compensate for LineStream
         cb();
     }
 
@@ -68,13 +68,13 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
     {
         leader.call(this); //this.wrapper();
 //append trailer code:
-        this.push(`
-            //SUFFIX:
+        this.push("//" + `
+            SUFFIX:
 //            if (typeof run == "function") run();
             ${opts.suffix || ""}
             ${!opts.run? "//": ""}run();
             } //end of wrapper+suffix
-            `.unindent.blue_lt); //replace(/^\s+/gm, ""));
+            `.trim().unindent.blue_lt); //replace(/^\s+/gm, ""));
         cb();
     }
 
@@ -82,17 +82,23 @@ function dsl2js(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
     function leader()
     {
         if (this.has_leader) return;
-        this.push(`
-            //PREFIX:
+        this.push("//" + `
+            PREFIX:
             "use strict";
-            const {/*include, walkAST,*/ step} = require("${__filename}");
+            const {/*include, walkAST,*/ debug, warn, error, parentify, step} = require("${__filename}");
             module.exports = function(){ //wrap all logic so it's included within AST
             ${opts.prefix || ""}
             //end prefix
-            `.unindent.blue_lt); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
+            `.trim().unindent.blue_lt); //replace(/^\s+/gm, "")); //drop leading spaces; heredoc idea from https://stackoverflow.com/questions/4376431/javascript-heredoc
 //        this.wrapper = function() {}; //only need to do this 1x
         this.has_leader = true; //1x only
     }
+}
+
+
+function pushline(str)
+{
+    /*if (str)*/ this.push(`${str || ""}\n`); //maintain correct line#
 }
 
 
@@ -208,7 +214,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //        if (opts.echo) console.error(`js dsl ${this.chunks.length} in:`, this.chunks.join("\n").cyan_lt.color_reset); //show source code input
         global.opts = opts || {}; //make command line args accessible to child (dsl) module
         const module = RequireFromString(this.chunks.join("\n").nocolors);
-        if (opts.debug) Object.keys(module).forEach((key, inx, all) => { console.error(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
+        if (opts.debug) Object.keys(module).forEach((key, inx, all) => { debug(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
 //            this.push(JSON.stringify(compiled, null, "  ") + "\n");
 //            this.push(Object.keys(compiled).join(", ") + "\n");
 //            if (opts.ast)
@@ -225,7 +231,14 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            }
 //debugger; //c = continue, n = step next, s = step in, o = step out, pause, run, repl, exec, kill, scripts, version, help
         const ast_raw = new AstNode(toAST(module)).add_ident("DSL_top"); //make it easier to identify in debug/error messages
-        if (opts.ast) console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
+        parentify(ast_raw, (ast_node) =>
+        {
+            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 1; //assign unique id# to each node for easier debug
+            return (ast_node || {}).type; //add parent refs to all ast nodes that have a type
+        });
+        if (opts.ast) fs.createWriteStream(`${opts.filename || "stdin"}-ast.txt`) //console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
+            .on("finish", () => debug(`dsl finished writing ast to ${opts.filename || "stdin"}-ast.txt`.green_lt))
+            .end(JSON.stringify(ast_raw, null, 2)); //show raw AST + close
 //        /*if (opts.ast)*/ this.push(/*"const ast = " +*/ ast + "\n"); //send downstream
 //            this.vars = {};
 //            this.funcs = {};
@@ -234,8 +247,11 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         const ast = opts.reduce? reduce(ast_raw): ast_raw;
         if (opts.ast && opts.reduce)
         {
-            if (opts.debug) console.error(`${numkeys(ast.context)} consts during reduce: ${Object.keys(ast.context || {}).join(", ")}`.blue_lt);
-            console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST
+            if (opts.debug) debug(`${numkeys(ast.context)} consts during reduce: ${Object.keys(ast.context || {}).join(", ")}`.blue_lt);
+//            console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST
+            fs.createWriteStream(`${opts.filename || "stdin"}-reduced.txt`)
+                .on("finish", () => debug(`dsl finished writing reduced ast to ${opts.filename || "stdin"}-ast.txt`.green_lt))
+                .end(JSON.stringify(ast, null, 2)) //show reduced (optimized) AST + close
         }
 //        traverse(ast, function(evttype, data) { this.emit(evttype, data); }); //emit events for AST nodes
 //        const tree = {};
@@ -243,7 +259,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
 //            this.push(`walked ast, ${Object.keys(this.consts).length} consts: ${Object.keys(this.consts).join(", ")}\n`);
-        console.error(`flushed ${this.chunks.length} chunks, walked ast`);
+        debug(`flushed ${this.chunks.length} chunks, walked ast`);
 //            console.error(`walked ast`);
 //            console.error(`${Object.keys(this.vars).length} vars: ${Object.keys(this.vars).join(", ")}`);
 //            console.error(`${Object.keys(this.funcs).length} funcs: ${Object.keys(this.funcs).map((key) =>
@@ -252,10 +268,11 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         {
             return {nest: (this.nest || 0) + 1, symtab: Object.assign({}, this.symtab || {}), new_frame: this.new_frame, }; //shallow copy to new stack frame
         }
+//        parentify(ast, (ast_node) => (ast_node || {}).type); //add parent refs to all ast nodes that have a type
         traverse(ast, stack, (evt, data) => { retval.emit(evt, data); });
         Object.keys(stack.symtab || {}).forEach((key) => { if (!stack.symtab[key]) warn(`undefined symbol in '${nameof(ast)}': ${symtype(stack.symtab[key])}:'${key}'`); }); //check for undefined stuff within this context
-        if (opts.debug)
-        console.error(`${numkeys(stack.symtab)} symbols: ${Object.keys(stack.symtab).map((key) =>
+//        if (opts.debug)
+        debug(`${numkeys(stack.symtab)} symbols: ${Object.keys(stack.symtab).map((key) =>
         {
             return `${symtype(stack.symtab[key])}:'${key}'`; //|| "(UNDEF)"}`;
         }).join(", ")}`.blue_lt);
@@ -293,18 +310,23 @@ const BinaryExpression = "BinaryExpression"; //{type, operator, left{}, right{}}
 const LogicalExpression = "LogicalExpression"; //{type, operator, left{}, right{}}
 const AssignmentExpression = "AssignmentExpression"; //{type, operator, left{}, right{}}
 const BlockStatement = "BlockStatement"; //{type, body[]}
+const ClassDeclaration = "ClassDeclaration"; //{type, id{}, superClass{}, body[]}
 const ExpressionStatement = "ExpressionStatement"; //{type, expression{}}
 const VariableDeclarator = "VariableDeclarator"; //{type, id, init{}, kind-inherited}
 const FunctionExpression = "FunctionExpression"; //{type, id{}, params[], defaults[], body{}, generator, expression}
 const FunctionDeclaration = "FunctionDeclaration"; //{type, id{}, params[], defaults[], body{}, generator, expression}
 const ArrowFunctionExpression = "ArrowFunctionExpression"; //{type, id{}, params[], defaults[], body{}, generator, expression}
 const IfStatement = "IfStatement"; //{type, test{}, consequent{}, alternate{}}
+const ConditionalExpression = "ConditionalExpression"; //{type, test{}, consequent{}, alternate{}}
 const ForStatement = "ForStatement"; //{type, init{}, test{}, update{}, body{}}
+const ForInStatement = "ForInStatement"; //{type, left{}, right{}, body{}}
 const WhileStatement = "WhileStatement"; //{type, test{}, body{}}
 const UnaryExpression = "UnaryExpression"; //{type, operator, argument{}}
 const UpdateExpression = "UpdateExpression"; //{type, operator, argument{}, prefix}
 const YieldExpression = "YieldExpression"; //{type, argument{}, delegate}
 const VariableDeclaration = "VariableDeclaration"; //{type, declarations[], kind}
+const ClassBody = "ClassBody"; //{type, body{}}
+const MethodDefinition = "MethodDefinition"; //{type, key{}, computed, value{}}
 const ObjectExpression = "ObjectExpression"; //{type, properties[]}
 const Property = "Property"; //{type, key{}, computed, value{}, kind, method, shorthand}
 const ArrayExpression = "ArrayExpression"; //{type, elements[]}
@@ -321,6 +343,7 @@ const BreakStatement = "BreakStatement"; //{type, label}
 const Identifier = "Identifier"; //{type, name}
 const EmptyStatement = "EmptyStatement"; //{type}
 const ThisExpression = "ThisExpression"; //{type}
+const Super = "Super"; //{type}
 
 
 //add some props and methods to raw AST nodes:
@@ -383,7 +406,7 @@ function walkAST(opts) //{}
 //            this.consts = {};
             this.symtab = {};
             const ast = !opts.reduce? reduce(ast_raw, this.symtab): ast_raw;
-            if (opts.ast && !opts.reduce) console.error(JSON5.stringify(ast, null, "  ").pink_lt); //show reduced AST also
+            if (opts.ast && !opts.reduce) console.error(JSON5.stringify(ast, null, 2).pink_lt); //show reduced AST also
             traverse(ast, "entpt"); //emit events for AST nodes
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
@@ -460,6 +483,7 @@ function reduce(ast_node, parent) //, symtab)
             }
             break;
         case BlockStatement: //{type, body[]}
+        case ClassBody: //{type, body[]}
             var numdrop = 0;
             (ast_node.body || []).forEach((stmt, inx, all) => { if (isconst(all[inx - numdrop] = reduce(stmt, ast_node))) ++numdrop; });
             if (numdrop) //prune stmt array
@@ -513,7 +537,14 @@ function reduce(ast_node, parent) //, symtab)
             }
 //TODO?            if (ast_node.body.type != BlockStatement) ast_node.body = {type: BlockStatement, body: []}; //insert block stmt to hang var dcls from
             break;
+        case ClassDeclaration: //{type, id{}, superClass{}, body{}}
+            ast_node.body = reduce(ast_node.body, ast_node);
+            break;
+        case MethodDefinition: //{type, key{}, computed, value{}}
+            ast_node.value = reduce(ast_node.value, ast_node);
+            break;
         case IfStatement: //{type, test{}, consequent{}, alternate{}}
+        case ConditionalExpression: //{type, test{}, consequent{}, alternate{}}
             ast_node.test = reduce(ast_node.test, ast_node);
             ast_node.consequent = reduce(ast_node.consequent, ast_node);
             ast_node.alternate = reduce(ast_node.alternate, ast_node);
@@ -525,6 +556,11 @@ function reduce(ast_node, parent) //, symtab)
             ast_node.update = reduce(ast_node.update, ast_node);
             ast_node.body = reduce(ast_node.body, ast_node);
             if (isconst0(ast_node.test)) return ast_node.init.why("for(;0;)"); //no body needed
+            break;
+        case ForInStatement: //{type, left{}, right{}, body{}}
+            ast_node.left = reduce(ast_node.left, ast_node);
+            ast_node.right = reduce(ast_node.right, ast_node);
+            ast_node.body = reduce(ast_node.body, ast_node);
             break;
         case WhileStatement: //{type, test{}, body{}}
             ast_node.test = reduce(ast_node.test, ast_node);
@@ -562,7 +598,7 @@ function reduce(ast_node, parent) //, symtab)
         case SwitchStatement: //{type, discriminant{}, cases[]}
             ast_node.discriminant = reduce(ast_node.discriminant, ast_node);
             (ast_node.cases || []).forEach((casestmt, inx, all) => { all[inx] = reduce(casestmt, ast_node); });
-            if (isconst(ast_node.discriminant)) console.error("TODO: reduce switch stmt".red_lt);
+            if (isconst(ast_node.discriminant)) debug("TODO: reduce switch stmt".red_lt);
             break;
         case SwitchCase: //{type, test{}, consequent[]}
             ast_node.test = reduce(ast_node.test, ast_node);
@@ -574,7 +610,7 @@ function reduce(ast_node, parent) //, symtab)
 //TODO                if (isconst(ast_node....)) console.error("TODO: reduce string".red_lt);
             break;
         case TemplateElement: //{type, value{}, tail}
-            ast_node.value = reduce(ast_node.value, ast_node);
+//no; leaf node            ast_node.value = reduce(ast_node.value, ast_node);
             break;
         case MemberExpression: //{type, computed, object{}, property{}}
             ast_node.object = reduce(ast_node.object, ast_node);
@@ -584,9 +620,10 @@ function reduce(ast_node, parent) //, symtab)
         case BreakStatement: //{type, label}
         case EmptyStatement: //{type}
         case ThisExpression: //{type}
+        case Super: //{type}
             break;
         default: //for debug
-            throw `AST reduce: unhandled node type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
+            /*throw*/ error(`AST reduce: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
     return AstNode(ast_node);
 }
@@ -600,11 +637,21 @@ function traverse(ast_node, context, emitter) //, nested)
 //    context.nested = context.nested || 0;
 //    const stack_frame = context; //{nested: (context.nested || 0) + 1, symtab: Object.assign({}, context.symtab}; //shallow copy to new stack frame
 //    stack_frame.nesting = 
+//    if (isNaN(ast_node.uid = ++traverse.uid)) ast_node.uid = traverse.uid = 1; //make debug easier by giving unique id# to each node
+    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
+    const evth = {ast_node};
+//if (false)
+{
+    emitter("ast-node", evth); //ast_node); //pass downstream for custom processing so caller can handle nodes of interest
+    if (!evth.wanted) return warn(`AST traverse: evt handler doesn't want node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.yellow_lt);
+//    if (!evth.wanted) return; //event handler (called synchronously) doesn't want this branch of ast
+}
     switch (ast_node.type)
     {
 //node types that affect nesting level, symbol table:
         case CallExpression: //{type, callee{}, arguments[]}
             var locals = context; //.new_frame(); //dynamic nesting not supported
+if (!(ast_node.arguments || []).forEach) debug(JSON.stringify(ast_node));
             (ast_node.arguments || []).forEach((arg) => { traverse(arg, locals, emitter); });
             traverse(ast_node.callee, locals, emitter);
 //            symtab[nameof(ast_node.callee)] = symtab[nameof(ast_node.callee)] || null; //create fwd ref if not defined yet
@@ -613,24 +660,25 @@ function traverse(ast_node, context, emitter) //, nested)
         case FunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
         case FunctionDeclaration: //{type, id{}, params[], defaults[], body{}, generator, expression}
         case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
-            if (context.symtab[nameof(ast_node)]) throw `duplicate func def: ${nameof(ast_node)}`.red_lt;
+            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate func def: ${nameof(ast_node)}`.red_lt);
             var locals = context.new_frame(); //static nesting
             (ast_node.params || []).forEach((param, inx, all) => { traverse(param2var(param), locals, emitter); }); //locals.symtab[nameof(param)] = param2var(param); }); //treat params as defined vars
             (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, locals, emitter); });
             traverse(ast_node.body, locals, emitter);
 //                console.error(`upon ${nameof(ast_node)} exit, local symbols are: ${Object.keys(locals).map((key) => { return `${symtype(locals[key])}:${key}`; })}`);
 //                console.error(`upon ${nameof(ast_node)} exit, parent symbols are: ${Object.keys(symtab).map((key) => { return `${symtype(symtab[key])}:${key}`; })}`);
-            console.error(`${numkeys(locals.symtab) - numkeys(context.symtab)} symbols defined/used in '${nameof(ast_node)}': ${Object.keys(locals.symtab).reduce((all_mine, key) => { if (!(key in context.symtab)) all_mine.push(`${symtype(locals.symtab[key])}:'${key}'`); return all_mine; }, []).join(", ")}`.cyan_lt); //NOTE: mine undef === null, sibling undef === false
+            debug(`${numkeys(locals.symtab) - numkeys(context.symtab)} symbols defined/used in '${nameof(ast_node)}': ${Object.keys(locals.symtab).reduce((all_mine, key) => { if (!(key in context.symtab)) all_mine.push(`${symtype(locals.symtab[key])}:'${key}'`); return all_mine; }, []).join(", ")}`.cyan_lt); //NOTE: mine undef === null, sibling undef === false
 //no, could be siblings, defined after                Object.keys(locals).forEach((key) => { if (!locals[key]) warn(`undefined symbol in '${nameof(ast_node)}': '${key}'`); }); //check for undefined stuff within this context
             Object.keys(locals.symtab).forEach((key) => { if (!locals.symtab[key]) context.symtab[key] = context.symtab[key] || locals.symtab[key]; }); //warn(`undefined symbol in '${nameof(ast_node)}': '${key}'`); }); //check for undefined stuff later within this context; defer to parent; skip "false", which were defered from a sibling/child
             context.symtab[nameof(ast_node)] = ast_node; //"TODO: func val?"; //update parent context
             break;
         case BlockStatement: //{type, body[]}
+        case ClassBody: //{type, body[]
             var locals = context; //.new_frame(); //TODO: bump nesting level here for better var space usage?
             (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, locals, emitter); });
             break;
         case VariableDeclarator: //{type, id, init{}, kind-inherited}
-            if (context.symtab[nameof(ast_node)]) throw `duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt;
+            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt);
 //            if (symtab[nameof(ast_node)]) throw `duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt;
 //            symtab[nameof(ast_node)] = (ast_node.kind == "const")? (isconst(ast_node.init)? makeconst(ast_node.init.value): ast_node.init): ast_node; //"TODO: eval?";
             context.symtab[nameof(ast_node)] = ast_node;
@@ -640,6 +688,12 @@ function traverse(ast_node, context, emitter) //, nested)
             context.symtab[nameof(ast_node)] = context.symtab[nameof(ast_node)] || UNDEF_VAR; //create fwd ref if not defined yet
             break;
 //as-is node types:
+        case ClassDeclaration: //{type, id{}, superClass{}, body{}}
+            traverse(ast_node.body, context, emitter);
+            break;
+        case MethodDefinition: //{type, key{}, computed, value{}}
+            traverse(ast_node.value, context, emitter);
+            break;
         case BinaryExpression: //{type, operator, left{}, right{}}
         case LogicalExpression: //{type, operator, left{}, right{}}
         case AssignmentExpression: //{type, operator, left{}, right{}}
@@ -651,6 +705,7 @@ function traverse(ast_node, context, emitter) //, nested)
             traverse(ast_node.expression, context, emitter);
             break;
         case IfStatement: //{type, test{}, consequent{}, alternate{}}
+        case ConditionalExpression: //{type, test{}, consequent{}, alternate{}}
             traverse(ast_node.test, context, emitter);
             traverse(ast_node.consequent, context, emitter);
             traverse(ast_node.alternate, context, emitter);
@@ -659,6 +714,11 @@ function traverse(ast_node, context, emitter) //, nested)
             traverse(ast_node.init, context, emitter);
             traverse(ast_node.test, context, emitter);
             traverse(ast_node.update, context, emitter);
+            traverse(ast_node.body, context, emitter);
+            break;
+        case ForInStatement: //{type, left{}, right{}, body{}}
+            traverse(ast_node.left, context, emitter);
+            traverse(ast_node.right, context, emitter);
             traverse(ast_node.body, context, emitter);
             break;
         case WhileStatement: //{type, test{}, body{}}
@@ -706,7 +766,7 @@ function traverse(ast_node, context, emitter) //, nested)
             (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, context, emitter); });
             break;
         case TemplateElement: //{type, value{}, tail}
-            traverse(ast_node.value, context, emitter);
+//no; leaf node            traverse(ast_node.value, context, emitter);
             break;
         case MemberExpression: //{type, computed, object{}, property{}}
             traverse(ast_node.object, context, emitter);
@@ -715,13 +775,15 @@ function traverse(ast_node, context, emitter) //, nested)
         case BreakStatement: //{type, label}
         case EmptyStatement: //{type}
         case ThisExpression: //{type}
+        case Super: //{type}
         case Literal : //{type, value, raw}
             break;
         default: //for debug
-            throw `AST traverse: unhandled node type '${ast_node.type}', node ${JSON5.stringify(ast_node, null, "  ")}`.red_lt;
+            /*throw*/ error(`AST traverse: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
-    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
-    emitter("ast-node", ast_node); //pass downstream for custom processing so caller can handle nodes of interest
+//    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
+if (false)
+    emitter("ast-node", evth); //{ast_node}); //pass downstream for custom processing so caller can handle nodes of interest
 //    return ast_node;
 }
 
@@ -737,11 +799,14 @@ function nameof(ast_node)
             return ast_node.id.name;
         case FunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
         case FunctionDeclaration: //{type, id{}, params[], defaults[], body{}, generator, expression}
+        case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
             return (ast_node.id || {name: "UNNAMED"}).name;
         case Identifier: //{type, name}
             return ast_node.name;
+        case Super: //{type}
+            return "super";
         default:
-            throw `AST nameof: unhandled node type: '${JSON.stringify(ast_node)}'`.red_lt; //for debug
+            /*throw*/ error(`AST nameof: unhandled node type: '${JSON.stringify(ast_node, null, 2)}'`.red_lt); //for debug
             return `unamed ${(ast_node || {type: "(no type)"}).type}`;
     }
 }
@@ -815,7 +880,7 @@ function debug_node(node_data)
 //    retval.emit("ast-node", node_data);
     const copy_node = AstNode(node_data);
     Object.keys(copy_node).forEach((key) => { if (typeof copy_node[key] == "object") copy_node[key] = "[object]"; }); //reduce clutter
-    console.error(JSON5.stringify(copy_node).blue_lt);
+    debug(JSON.stringify(copy_node).blue_lt);
 }
 
 //    function isempty(ast_node) { return ((ast_node || {}).type == "EmptyStatement"); }
@@ -1062,6 +1127,39 @@ function srcline(level)
 function numkeys(thing) { return Object.keys(thing || {}).length; }
 
 
+//tag object with parent node references:
+//inspired by https://stackoverflow.com/questions/2980763/javascript-objects-get-parent
+//TODO: npm publish
+const parentify =
+module.exports.parentify =
+function parentify(node, filter, parent)
+{
+    if (node && (typeof node == "object")) //NOTE: typeof null = "object" :(
+    {
+//    obj.parent = parent; //CAUTION: creates circular refs
+//        if (parent)
+        if (!filter || filter(node)) Object.defineProperty(node, "parent", {value: parent}); //!enumerable, !writable; CAUTION: creates circular refs
+//    for (var i in obj)
+//    {
+//        if (typeof obj[i] == "object") obj[i].parent = obj;
+//        parent_tags(obj[i], obj);
+//    }
+//debug(typeof node, node == undefined, node === null); //Object.keys(node).length);
+        Object.keys(node).forEach((key) => parentify(node[key], filter, node)); //CAUTION: recursion
+    }
+    return node; //fluent
+}
+
+
+//give each node a unique id# for easier debug:
+//const uniqify =
+//module.exports.uniqify =
+//function uniqift(node)
+//{
+//    if (isNaN(ast_node.uid = ++traverse.uid)) ast_node.uid = traverse.uid = 1;
+//}
+
+
 /*
 const error =
 module.exports.error =
@@ -1206,6 +1304,7 @@ const DEFAULT_OPTS =
     codegen: true, //generate code (emit ast events)
 };
 
+
 const dsl_CLI =
 module.exports.CLI =
 function dsl_CLI(more_opts)
@@ -1216,7 +1315,7 @@ function dsl_CLI(more_opts)
 //    const {LineStream} = require('byline');
 //    const CWD = "";
 //    const filename = (process.argv.length > 2)? `'${pathlib.relative(CWD, process.argv.slice(-1)[0])}'`: null;
-    const opts = /*CLI.opts =*/ new Proxy(
+    const opts = dsl_CLI.opts = new Proxy(
         Object.assign({}, DEFAULT_OPTS, more_opts || {}), //start with shallow copy
         {
 //            get: function(target, propname) //debug only
@@ -1227,57 +1326,20 @@ function dsl_CLI(more_opts)
             set: function(target, propname, newvalue) //, real_target) //keep track of changed values
             {
 //for unique changes?                if (target[propname] === newvalue) return; //no change
+                if (propname == "changes") { target.changes = newvalue; return true; } //kludge: allow caller to mess with tracked changes
                 target[propname] = newvalue;
-                if (!target.changes) Object.defineProperty(target, "changes", {value: {}, }); //defaults to !changeable, !enumerable
+                if (!target.changes) Object.defineProperty(target, "changes", {value: {}, writable: true, }); //defaults to !changeable, !enumerable
                 if (isNaN(++target.changes[propname])) target.changes[propname] = 1; //count #changes
-                return true; //asst successful
+                return true; //assigned successfully
             },
         });
 //    const [instrm, outstrm] = [opts.filename? fs.createReadStream(opts.filename.unquoted): process.stdin, process.stdout]; //fs.createWriteStream("dj.txt")];
 //    const retstrm =
 //        instrm
-    const retstrm =
-        CLI(opts)
-        .on("args", (argv) =>
-        {
-            /*process.*/argv.forEach((arg, i, all) =>
-            {
-                const /*arg = process.argv[i],*/ argname = `arg[${i}/${process.argv.length}]`;
-                debug(`${argname}: '${arg}' => `.blue_lt);
-                if (i < 2) { debug.more("SKIP".blue_lt); return; } //skip node + script file names
-        //            var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
-                const OPTION_xre = XRegExp(`
-                    (?<onoff> [+-] )?  #allow turn on/off (allows caller to override defaults)
-                    (?<name> [^=]+ )  #name of option
-                    (
-                        =  #assign non-boolean value (optional)
-                        (?<value> .* )
-                    )?
-                `.anchorRE, "x");
-                var parts = arg.match(OPTION_xre);
-                if (!parts || (parts.onoff && parts.value)) { debug.more("INVALID".red_lt); return error(`invalid option in ${argname}: '${arg}'`); }
-                if (!parts.onoff && !parts.value) parts = {name: "filename", value: (parts.name.unquoted || parts.name).quoted1, }; //treat stand-alone value as filename; strip optional quotes and then re-add
-                opts[parts.name.toLowerCase()] = parts.onoff? (parts.onoff == "+"): parts.value;
-                if (opts.changes[parts.name.toLowerCase()] > 1) //option was already specified
-                {
-                    warn(`${argname} '${arg}' overrides prior option value`);
-                    debug.more("OVERRIDE ".yellow_lt);
-                }
-                debug.more(`${parts.name} = ${opts[parts.name.toLowerCase()]}`.cyan_lt);
-            });
-//    const debug_out = []; //collect output until debug option is decided (options can be in any order)
-//    for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
-//        shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
-//    console.log(JSON.stringify(opts, null, "  "));
-            Object.keys(opts).forEach((key) =>
-            {
-                if (key.toLowerCase() in opts.changes) return;
-                debug(`default option: ${`${key} = ${opts[key]}`.cyan_lt}`); //show default options also
-            });
-//    if (opts.debug) console.error(debug_out.join("\n").blue_lt.color_reset);
-            if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
-            console.error(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
-        })
+//    const retstrm =
+    debug("DSL engine: finish asynchronously".green_lt);
+    return CLI(opts)
+        .on("args", (argv) => set_opts(argv, opts))
 //        .pipe(prepend())
 //        .pipe(new LineStream({keepEmptyLines: true})) //preserve line#s (for easier debug)
 //        .pipe(PreProc(infile))
@@ -1300,23 +1362,80 @@ function dsl_CLI(more_opts)
 //        .on("astnode", data => { console.error(`ast node: ${JSON5.stringify(data)}`.cyan_lt)})
 //??        .pipe(outstrm)
 //        .on("data", (data) => { console.error(`data: ${data}`.blue_lt)})
-        .on("finish", () => { console.error("ast strm: finish".green_lt); })
-        .on("close", () => { console.error("ast strm: close".green_lt); })
-        .on("done", () => { console.error("ast strm: done".green_lt); })
-        .on("end", () => { console.error("ast strm: end".green_lt); })
-        .on("error", err =>
-        {
-            console.error(`ast strm error: ${err}`.red_lt);
-            process.exit();
-        });
-    console.error("DSL engine: finish asynchronously".green_lt);
+        .on("finish", () => { eof("finish"); })
+        .on("close", () => { eof("close"); })
+        .on("done", () => { eof("done"); })
+        .on("end", () => { eof("end"); })
+        .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); });
+//    debug("DSL engine: finish asynchronously".green_lt);
 //    retstrm.emit("dsl-opts", opts);
-console.error(typeof retstrm);
-    return retstrm;
+//console.error(typeof retstrm);
+//    return retstrm;
+
+    function eof(why)
+    {
+//        CaptureConsole.stopCapture(process.stdout);
+        debug(`${__file} stream: ${why || "eof"}`.green_lt);
+        console.error(`${warn.count || 0} warnings`.yellow_lt);
+        console.error(`${error.count} errors`.red_lt);
+    }
 }
 //                  _____<____________<_________
 //                 /                            \
 //file or stdin ---\--> macro expand -> REPL ---/----> AST
+
+
+function set_opts(argv, opts)
+{
+//debug(`dsl args ${JSON.stringify(argv)}`.pink_lt);
+//debug("dsl beginning opts", opts);
+//            debug.enabled.push([]); //collect output until caller decides
+    var sv_debug_enabled;
+    if (sv_debug_enabled = debug.enabled) debug.enabled = []; //turn on buffering so debug.more() will work
+    opts.changes = {}; //kludge: exclude initial values from change tracking
+    /*process.*/argv.forEach((arg, i, all) =>
+    {
+        const /*arg = process.argv[i],*/ argname = `arg[${i}/${/*process.*/argv.length}]`;
+        debug(`${argname}: '${arg}' =>`.blue_lt);
+        if (i < 2) { debug.more("SKIP".blue_lt); return; } //skip node + script file names
+//            var parts = arg.match(/^([+-])?([^=]+)(=(.*))?$/);
+        const OPTION_xre = XRegExp(`
+            (?<onoff> [+-] )?  #allow turn on/off (allows caller to override defaults)
+            (?<name> [^=]+ )  #name of option
+            (
+                =  #assign non-boolean value (optional)
+                (?<value> .* )
+            )?
+        `.anchorRE, "x");
+        var parts = arg.match(OPTION_xre);
+        if (!parts || (parts.onoff && parts.value)) { debug.more("INVALID".red_lt); return error(`invalid option in ${argname}: '${arg}'`); }
+        if (!parts.onoff && !parts.value) parts = {name: "filename", value: (parts.name.unquoted || parts.name).quoted1, }; //treat stand-alone value as filename; strip optional quotes and then re-add
+//                parts.name = parts.name.toLowerCase();
+        var sv_value = opts[parts.name.toLowerCase()];
+        opts[parts.name.toLowerCase()] = parts.onoff? (parts.onoff == "+"): parts.value;
+        debug.more(`${parts.name} = ${opts[parts.name.toLowerCase()]}`.cyan_lt);
+        if (opts.changes[parts.name.toLowerCase()] > 1) //option was already specified
+        {
+            warn(`${argname} '${arg}' overrides prior value '${JSON.stringify(sv_value)}'`);
+            debug.more("OVERRIDE".yellow_lt);
+        }
+    });
+//            debug.enabled.pop();
+    debug.enabled = sv_debug_enabled;
+//    const debug_out = []; //collect output until debug option is decided (options can be in any order)
+//    for (var i = 0; i < process.argv.length; ++i) //command line options; NOTE: shebang in input file might also have args (split and strip comments)
+//        shebang_args(process.argv[i], i - 2).forEach((arg, inx, all) =>
+//    console.log(JSON.stringify(opts, null, "  "));
+    Object.keys(opts).forEach((key) =>
+    {
+        if (key.toLowerCase() in opts.changes) return;
+        debug("default option:".blue_lt, `${key} = ${opts[key]}`.cyan_lt); //show default options also
+    });
+//    if (opts.debug) console.error(debug_out.join("\n").blue_lt.color_reset);
+    if (opts.help) console.error(`usage: ${pathlib.basename(__filename)} [+-codegen] [+-debug] [+-echo] [+-help] [+-src] [filename]\n\tcodegen = don't generate code from ast\n\tdebug = show extra info\n\techo = show macro-expanded source code into REPL\n\tfilename = file to process (defaults to stdin if absent)\n\thelp = show usage info\n\tsrc = display source code instead of compiling it\n`.yellow_lt);
+    debug(`DSL engine: reading from ${opts.filename || "stdin"} ...`.green_lt);
+}
+
 
 if (!module.parent) dsl_CLI().pipe(process.stdout); //auto-run CLI, generated output to console
 

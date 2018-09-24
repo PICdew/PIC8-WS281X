@@ -4,15 +4,15 @@
 //"use strict";
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
-const JSON5 = require("json5");
-console.log("opts: " + JSON5.stringify(opts));
+//const JSON5 = require("json5");
+console.log("opts: " + JSON.stringify(opts));
 
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`
 #else
  #warning "no XYZ"
 #endif
-#define XYZ  hello
+#define XYZ  "hello"
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`
 #else
@@ -46,7 +46,7 @@ console.log("hello " + simple_func(4)); \
 #warning `error# ${simple_func(3+4)}`.red_lt
 #warning simple_func(5)
 
-console.log("args: " + JSON.stringify(process.argv, null, "  "));
+console.log("args: " + JSON.stringify(/*process.argv*/ opts, null, "  "));
 
 //const a = [1, 2, 3];
 //a.forEach((v) => { console.error("loop: " + v + " " + simple_func(v)); });
