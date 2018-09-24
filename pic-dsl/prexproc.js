@@ -1493,9 +1493,16 @@ function extensions()
 ////    console.error("json5.stringify: " + typeof sv_stringify);
 //        return (this.sv_stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
 //    }
+    const JSON5 = require("json5"); //more reader-friendly JSON; doesn't need to be visible to wider scope since we are replacing built-in JSON.stringify; https://github.com/json5/json5
+    const sv_json_stringify = JSON.stringify;
     JSON.stringify = function(args)
     {
-        const JSON5 = require("json5"); //more reader-friendly JSON; doesn't need to be visible to wider scope since we are replacing built-in JSON.stringify; https://github.com/json5/json5
+//var test_val0 = JSON.doing_stringify;
+//var test_val1 = ++JSON.doing_stringify;
+//var test_val2 = ++JSON.doing_stringify? "yes": "no";
+//console.error(typeof test_val0, test_val0, typeof test_val1, test_val1, typeof test_val2, test_val2);
+        if (++JSON.doing_stringify) return sv_json_stringify.apply(JSON, arguments); //JSON5 uses JSON; avoid infinite recursion
+        JSON.doing_stringify = 0;
         return (JSON5.stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
     }
 //XRegExp is interchangeable with RE, so make the API interchangeable as well (allows named captures)
