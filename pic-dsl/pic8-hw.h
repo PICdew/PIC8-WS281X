@@ -74,9 +74,9 @@ function MPU(opts)
         if (name) bank.name = name;
         if (bank.ends <= bank.begins) throw `MPU: bad ${bank.name} len (begins ${bank.begins.toString(16)}, ends ${bank.ends.toString(16)})`.red_lt;
         total += memlen(bank);
-        for (var o in seen)
+        for (var other in seen)
         {
-            if ((bank.begins >= seen[o].begins) && (bank.ends <= seen[o].ends)) throw `MPU: ${bank.name} (begins ${bank.begins.toString(16)}, ends ${bank.ends.toString(16)}) overlaps bank ${seen[o].name} (begins ${seen[o].begins.toString(16)}, ends ${seen[o].ends.toString(16)})`.red_lt;
+            if ((bank.begins >= seen[other].begins) && (bank.ends <= seen[other].ends)) throw `MPU: ${bank.name} (begins ${bank.begins.toString(16)}, ends ${bank.ends.toString(16)}) overlaps bank ${seen[other].name} (begins ${seen[other].begins.toString(16)}, ends ${seen[other].ends.toString(16)})`.red_lt;
             seen[bank.name] = bank;
         }
     }

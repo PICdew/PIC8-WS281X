@@ -14,10 +14,11 @@ const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
 //
 
 //TODO: move some of this logic into dsl #include file?
-function process_node(ast_node, state, opts)
+function process_node(ast_node, /*state,*/ opts)
 {
 //    opts = process_node.opts; //kludge; get from caller
-    if (opts.no_codegen) return false; //not interested
+    if (opts.no_codegen) return; //false; //not interested
+    if (!ast_node.uid) error(`unknown ast node: ${JSON.stringify(ast_node, show_object_placeholder)}`);
 //    if (!ast_node) return;
     switch (ast_node.type)
     {
@@ -125,7 +126,8 @@ function process_node(ast_node, state, opts)
         case "EmptyStatement": //{type}
         case "Literal" : //{type, value, raw}
 //            break;
-            return true; //quietly ignore ast node, but continue processing
+//            debug("PIC8-ignore", JSON.stringify({type: ast_node.type, uid: ast_node.uid}).blue_lt);
+            return; //true; //quietly ignore ast node, but continue processing
         default: //for debug
             /*throw*/ error(`PIC8-DSL node evt: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
@@ -149,7 +151,7 @@ function process_node(ast_node, state, opts)
         debug("PIC8", `parent ${(ast_node.parent || {}).type}`.blue_lt, JSON.stringify(ast_node, show_object_placeholder).blue_lt);
     }
 //    return ast_node;
-    return true; //continue processing
+//    return true; //continue processing
 }
 
 
@@ -173,7 +175,8 @@ function pic8_CLI(opts)
 //    opts = opts || {};
     return CLI(Object.assign({}, my_opts, opts || {})) //caller opts override my defaults
 //        .on("dsl-opts", (opts) => { console.log(JSON5.stringify(opts).green_lt); my_CLI.save_opts = opts; })
-        .on("ast-node", (node_data_wrapper) => { node_data_wrapper.wanted = process_node(node_data_wrapper.ast_node, state, CLI.opts); }); //my_CLI.save_opts); });
+        .on("ast-node", (node_data) => process_node(node_data, CLI.opts)); //my_CLI.save_opts); });
+//        .on("ast-node", (node_data_wrapper) => { node_data_wrapper.wanted = process_node(node_data_wrapper.ast_node, state, CLI.opts); }); //my_CLI.save_opts); });
 //        {
 //            if (!opts.codegen) return;
 //            (data.children || []).forEach((key) => { key = key.replace("[]", ""); if (data[key]) data[key] = key.toUpperCase(); });

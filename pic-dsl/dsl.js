@@ -234,6 +234,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         parentify(ast_raw, (ast_node) =>
         {
             if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 1; //assign unique id# to each node for easier debug
+            ast_node.uid += 0.1; //`${ast_node.uid}$`; //make text search easier (for debug)
             return (ast_node || {}).type; //add parent refs to all ast nodes that have a type
         });
         if (opts.ast) fs.createWriteStream(`${opts.filename || "stdin"}-ast.txt`) //console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
@@ -267,7 +268,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         stack.new_frame = function()
         {
             return {nest: (this.nest || 0) + 1, symtab: Object.assign({}, this.symtab || {}), new_frame: this.new_frame, }; //shallow copy to new stack frame
-        }
+        };
 //        parentify(ast, (ast_node) => (ast_node || {}).type); //add parent refs to all ast nodes that have a type
         traverse(ast, stack, (evt, data) => { retval.emit(evt, data); });
         Object.keys(stack.symtab || {}).forEach((key) => { if (!stack.symtab[key]) warn(`undefined symbol in '${nameof(ast)}': ${symtype(stack.symtab[key])}:'${key}'`); }); //check for undefined stuff within this context
@@ -354,7 +355,7 @@ function AstNode(props, parent)
     props.context = props.context || (parent || {}).context || {}; //inherit from parent
 //    if (!(this instanceof AstNode)) return new AstNode(opts, parent);
 //    if (!(this instanceof AstNode)) return Object.create(AstNode.prototype, opts);
-    return Object.assign((this instanceof AstNode)? this: Object.create(AstNode.prototype), props);
+    return Object.assign((this instanceof AstNode)? this: Object.create(AstNode.prototype), props, {uid: -1});
 /*
     if (this instanceof AstNode) return this;
 //    {
@@ -447,7 +448,7 @@ function reduce(ast_node, parent) //, symtab)
 //node types with optimization:
         case CallExpression: //{type, callee{}, arguments[]}
             ast_node.callee = reduce(ast_node.callee, ast_node);
-            if (ignore(nameof(ast_node.callee))) return NULL_EXPR.why("ignore ext func"); //NULL_EXPR; //exclude Node.js run-time functions
+//            if (ignore(nameof(ast_node.callee))) return NULL_EXPR.why("ignore ext func"); //NULL_EXPR; //exclude Node.js run-time functions
             (ast_node.arguments || []).forEach((arg, inx, all) => { all[inx] = reduce(arg, ast_node); });
             if (nameof(ast_node.callee).match(/^Math\./)) 
 //                    if (isconst(ast_node)) return makeconst(eval(`${nameof(ast_node.callee)}()
@@ -639,19 +640,19 @@ function traverse(ast_node, context, emitter) //, nested)
 //    stack_frame.nesting = 
 //    if (isNaN(ast_node.uid = ++traverse.uid)) ast_node.uid = traverse.uid = 1; //make debug easier by giving unique id# to each node
     ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
-    const evth = {ast_node};
+//    const evth = {ast_node};
 //if (false)
-{
-    emitter("ast-node", evth); //ast_node); //pass downstream for custom processing so caller can handle nodes of interest
-    if (!evth.wanted) return warn(`AST traverse: evt handler doesn't want node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.yellow_lt);
+//{
+//    emitter("ast-node", evth); //ast_node); //pass downstream for custom processing so caller can handle nodes of interest
+//    if (!evth.wanted) return warn(`AST traverse: evt handler doesn't want node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.yellow_lt);
 //    if (!evth.wanted) return; //event handler (called synchronously) doesn't want this branch of ast
-}
+//}
     switch (ast_node.type)
     {
 //node types that affect nesting level, symbol table:
         case CallExpression: //{type, callee{}, arguments[]}
             var locals = context; //.new_frame(); //dynamic nesting not supported
-if (!(ast_node.arguments || []).forEach) debug(JSON.stringify(ast_node));
+//if (!(ast_node.arguments || []).forEach) debug(JSON.stringify(ast_node));
             (ast_node.arguments || []).forEach((arg) => { traverse(arg, locals, emitter); });
             traverse(ast_node.callee, locals, emitter);
 //            symtab[nameof(ast_node.callee)] = symtab[nameof(ast_node.callee)] || null; //create fwd ref if not defined yet
@@ -782,8 +783,8 @@ if (!(ast_node.arguments || []).forEach) debug(JSON.stringify(ast_node));
             /*throw*/ error(`AST traverse: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
 //    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
-if (false)
-    emitter("ast-node", evth); //{ast_node}); //pass downstream for custom processing so caller can handle nodes of interest
+//if (false)
+    emitter("ast-node", ast_node); //pass downstream for custom processing so caller can handle nodes of interest
 //    return ast_node;
 }
 
@@ -811,15 +812,15 @@ function nameof(ast_node)
     }
 }
 
-function ignore(funcname)
-{
-    const IGNORES = [/^console\..*$/, /^setInterval$/, /^clearInterval$/, /^step$/];
-    return IGNORES.some((pattern, inx, all) =>
-    {
-//            console.error(`drop[${inx}/${all.length}] call to '${funcname}'? ${!!funcname.match(pattern)}`);
-        return funcname.match(pattern);
-    });
-}
+//function ignore(funcname)
+//{
+//    const IGNORES = [/^console\..*$/, /^setInterval$/, /^clearInterval$/, /^step$/];
+//    return IGNORES.some((pattern, inx, all) =>
+//    {
+////            console.error(`drop[${inx}/${all.length}] call to '${funcname}'? ${!!funcname.match(pattern)}`);
+//        return funcname.match(pattern);
+//    });
+//}
 
 //add comment:
 //function why(ast_node, why)
@@ -864,7 +865,7 @@ function param2var(param_node)
 {
 //    return new AstNode({type: VariableDeclarator, id: param_node, init: null, kind: "var"});
 //    return new AstNode({type: VariableDeclarator, kind: "var", }).add_ident(param_node.name);
-    return {type: VariableDeclarator, id: param_node, kind: "var", };
+    return {type: VariableDeclarator, id: param_node, kind: "var-param", uid: param_node.uid || -2};
 }
 
 function symtype(ast_node)
@@ -1296,6 +1297,7 @@ const DEFAULT_OPTS =
     debug: false, //diagnostic info
     echo: false, //echo preprocessed input to stderr (for debug)
     shebang: false, //don't keep shebang (comment it out)
+    entpt: "main",
 //optional phases:
     preproc: true, //macro preprocessor
     run: false, //run-time initialization/sim

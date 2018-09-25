@@ -1493,18 +1493,24 @@ function extensions()
 ////    console.error("json5.stringify: " + typeof sv_stringify);
 //        return (this.sv_stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
 //    }
-    const JSON5 = require("json5"); //more reader-friendly JSON; doesn't need to be visible to wider scope since we are replacing built-in JSON.stringify; https://github.com/json5/json5
-    const sv_json_stringify = JSON.stringify;
+//    const JSON5 = require("json5"); //more reader-friendly JSON; doesn't need to be visible to wider scope since we are replacing built-in JSON.stringify; https://github.com/json5/json5
+    JSON.saved_stringify = JSON.stringify;
     JSON.stringify = function(args)
     {
 //var test_val0 = JSON.doing_stringify;
 //var test_val1 = ++JSON.doing_stringify;
 //var test_val2 = ++JSON.doing_stringify? "yes": "no";
 //console.error(typeof test_val0, test_val0, typeof test_val1, test_val1, typeof test_val2, test_val2);
-        if (++JSON.doing_stringify) return sv_json_stringify.apply(JSON, arguments); //JSON5 uses JSON; avoid infinite recursion
-        JSON.doing_stringify = 0;
-        return (JSON5.stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
-    }
+//        if (++JSON.doing_stringify) return sv_json_stringify.apply(JSON, arguments); //JSON5 uses JSON; avoid infinite recursion
+//        JSON.doing_stringify = 0;
+//        return (JSON5.stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
+//        const want_fixup = (arguments.length < 2) && "replace"; //leave as-is if caller is using custom fmter
+        return (JSON.saved_stringify.apply(JSON, arguments) || "")
+//            .replace(/"(\w+)":/g, want_fixup? "$1: ": "$1:") //remove quotes from key names, put space after if no fmter passed in
+//            /*.replace*/ [want_fixup || "nop"](/,(?=\w)/gi, ", "); //also put a space after "," for easier readability
+            .replace(/"(\w+)":/g, "$1: ") //remove quotes from key names, put space after if no fmter passed in
+            .replace(/,(?=\w)/gi, ", "); //also put a space after "," for easier readability
+}
 //XRegExp is interchangeable with RE, so make the API interchangeable as well (allows named captures)
 //    console.log(String.prototype.match.toString());
 //    String.prototype.sv_match = String.prototype.match;
@@ -1517,6 +1523,7 @@ function extensions()
 //    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
 //conflict with prop:    String.prototype.color_reset = function(color) { return color_reset(this.toString(), color); }
     String.prototype.echo_stderr = function(desc, depth) { console.error(`${desc || "echo_stderr"} ${srcline(1 + (depth || 0))}`, this/*.toString()*/); return this; }
+    String.prototype.nop = function() { return this; } //for conditional fmting (fluent)
 //define parameter-less functions as properties:
     Object.defineProperties(String.prototype,
     {

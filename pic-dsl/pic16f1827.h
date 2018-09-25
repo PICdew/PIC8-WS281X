@@ -47,9 +47,10 @@ const PIC/*16F1827*/ = new PIC8X(
     max_intosc: 8 MHz,
     max_freq: 32 MHz,
     PLL: 4, //4x int osc speed
-#ifdef CLOCK_FREQ
-    clock: CLOCK_FREQ,
-#endif
+//#ifdef CLOCK_FREQ
+//    clock: CLOCK_FREQ,
+//#endif
+    get clock() { return this.max_freq; }, //default max speed
 });
 
 

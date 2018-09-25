@@ -1,4 +1,4 @@
-#!./pic8-dsl.js +debug +echo -DX -UX -DX=4 -DX="a b" +preproc +ast -run -reduce -codegen  #comment out this line for Node.js REPL .load command
+#!./pic8-dsl.js +debug +echo -DX -UX -DX=4 -DX="a b" +preproc +ast +run -reduce -codegen  #comment out this line for Node.js REPL .load command
 //NOTE: console.log (stdout) goes to Javascript; use console.error (stderr) to go to screen without interference
 
 //"use strict";
@@ -32,6 +32,16 @@ console.log("opts: " + JSON.stringify(opts));
 //var TRISA = reg8(0x91), PORTA = reg8(0x11), TMR1, T1IF;
 PIC.clock = 32 MHz;
 
+//#define myReg  MPU.myReg //new Proxy(PIC.Reg({bits: 0x3f, addr: PORTA_ADDR, init: 0}), //{},
+//Object.defineProperty(MPU, "myReg",
+//{
+//    enumerable: true,
+//    get() { return this.ram[0x33]; },
+//    set(newval) { this.ram[0x33] = newval; },
+//});
+//myReg = 5; //MPU.myReg = 5;
+//var myReg = MPU.Reg8(0x33);
+//myReg = 4;
 
 #include("./hello-helper.dsl");
 #include "./hello-helper.dsl";
