@@ -141,7 +141,7 @@ function process_node(ast_node, /*state,*/ opts)
 //no; don't change node data                    if (typeof node[key][k] == "object") node[key][k] = `[${k.toUpperCase()}]`;
 //                    else if()
 //        }); //reduce clutter
-        function show_object_placeholder(key, value)
+        function show_object_placeholder(key, value) //this[key] === value
         {
             return (typeof value != "object")? value:
                 (key == "id")? `[${value.name || "ID"}]`:

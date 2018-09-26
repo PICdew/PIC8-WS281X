@@ -214,7 +214,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //        if (opts.echo) console.error(`js dsl ${this.chunks.length} in:`, this.chunks.join("\n").cyan_lt.color_reset); //show source code input
         global.opts = opts || {}; //make command line args accessible to child (dsl) module
         const module = RequireFromString(this.chunks.join("\n").nocolors);
-        if (opts.debug) Object.keys(module).forEach((key, inx, all) => { debug(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt); }, this);
+        if (opts.debug) Object.keys(module).forEach((key, inx, all) => debug(`dsl export[${inx}/${all.length}]: ${typeof module[key]} '${key}'`.blue_lt), this);
 //            this.push(JSON.stringify(compiled, null, "  ") + "\n");
 //            this.push(Object.keys(compiled).join(", ") + "\n");
 //            if (opts.ast)
@@ -233,9 +233,9 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
         const ast_raw = new AstNode(toAST(module)).add_ident("DSL_top"); //make it easier to identify in debug/error messages
         parentify(ast_raw, (ast_node) =>
         {
-            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 1; //assign unique id# to each node for easier debug
-            ast_node.uid += 0.1; //`${ast_node.uid}$`; //make text search easier (for debug)
-            return (ast_node || {}).type; //add parent refs to all ast nodes that have a type
+            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 0.1; //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
+//            ast_node.uid += 0.1; //`${ast_node.uid}$`; //make text search easier (for debug)
+            return (ast_node || {}).type || (ast_node || []).length; //add parent refs to all ast nodes that have a type or length (array)
         });
         if (opts.ast) fs.createWriteStream(`${opts.filename || "stdin"}-ast.txt`) //console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
             .on("finish", () => debug(`dsl finished writing ast to ${opts.filename || "stdin"}-ast.txt`.green_lt))
@@ -270,7 +270,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
             return {nest: (this.nest || 0) + 1, symtab: Object.assign({}, this.symtab || {}), new_frame: this.new_frame, }; //shallow copy to new stack frame
         };
 //        parentify(ast, (ast_node) => (ast_node || {}).type); //add parent refs to all ast nodes that have a type
-        traverse(ast, stack, (evt, data) => { retval.emit(evt, data); });
+        traverse(ast, stack, (evt, data) => retval.emit(evt, data));
         Object.keys(stack.symtab || {}).forEach((key) => { if (!stack.symtab[key]) warn(`undefined symbol in '${nameof(ast)}': ${symtype(stack.symtab[key])}:'${key}'`); }); //check for undefined stuff within this context
 //        if (opts.debug)
         debug(`${numkeys(stack.symtab)} symbols: ${Object.keys(stack.symtab).map((key) =>
@@ -431,8 +431,8 @@ function walkAST(opts) //{}
 
 
 //optimization:
-//coalesce compile-time constants, drop run-time functions, etc.
-//NOTE: this is an optional pass; caller can disable
+//coalesce compile-time constants, drop extraneous code, etc.
+//NOTE: this is an optional pass; caller can disable so ast traversal later should not depend on reduce()
 function reduce(ast_node, parent) //, symtab)
 {
 //        const EMPTY_STMT = {type: "EmptyStatement"};
@@ -447,13 +447,13 @@ function reduce(ast_node, parent) //, symtab)
     {
 //node types with optimization:
         case CallExpression: //{type, callee{}, arguments[]}
+            (ast_node.arguments || []).forEach((arg, inx, all) => all[inx] = reduce(arg, ast_node)); //reduce args before calling function
             ast_node.callee = reduce(ast_node.callee, ast_node);
 //            if (ignore(nameof(ast_node.callee))) return NULL_EXPR.why("ignore ext func"); //NULL_EXPR; //exclude Node.js run-time functions
-            (ast_node.arguments || []).forEach((arg, inx, all) => { all[inx] = reduce(arg, ast_node); });
             if (nameof(ast_node.callee).match(/^Math\./)) 
 //                    if (isconst(ast_node)) return makeconst(eval(`${nameof(ast_node.callee)}()
-                if (ast_node.arguments.every((arg) => { return isconst(arg); }))
-                    return makeconst(`${nameof(ast_node.callee)}(${ast_node.arguments.map((arg) => { return arg.value; }).join(", ")})`).why("built-in(all const) eval");
+                if (ast_node.arguments.every((arg) => isconst(arg)))
+                    return makeconst(`${nameof(ast_node.callee)}(${ast_node.arguments.map((arg) => arg.value).join(", ")})`).why("built-in(all const) eval");
 //                if ((this.symtab[nameof(ast_node)] || {}).my_type ==)
 //            symtab[nameof(ast_node.callee)] = symtab[nameof(ast_node.callee)] || null; //create fwd ref if not defined yet
             break;
@@ -470,14 +470,14 @@ function reduce(ast_node, parent) //, symtab)
 //debug_node(AstNode(ast_node.left).why(ast_node.operator + " lhs is const? " + isconst(ast_node.left)));
 //debug_node(AstNode(ast_node.right).why(ast_node.operator + " rhs is const? " + isconst(ast_node.right)));
             if (isconst(ast_node.left) && isconst(ast_node.right)) return makeconst(`${ast_node.left.value} ${ast_node.operator} ${ast_node.right.value}`).why("lhs + rhs const");
-            if (isconst0(ast_node.right))
+            if (isfalsey(ast_node.right))
             {
                 if (BENIGN_OPS[ast_node.operator]) return ast_node.left.why("rhs not needed");
                 if (ZERO_OPS[ast_node.operator])
                     if (ast_node.type == AssignmentExpression) return ast_node.assn_value(0).why("asst to 0");
                     else return makeconst(0).why("op rhs 0");
             }
-            if (isconst0(ast_node.left) && (ast_node.type != AssignmentExpression))
+            if (isfalsey(ast_node.left) && (ast_node.type != AssignmentExpression))
             {
                 if (BENIGN_OPS[ast_node.operator]) return ast_node.right.why("lhs not needed");
                 if (ZERO_OPS[ast_node.operator]) return makeconst(0).why("op lhs 0");
@@ -503,7 +503,7 @@ function reduce(ast_node, parent) //, symtab)
             if (isconst(ast_node.expression)) return NULL_EXPR.why("const expr stmt"); //EMPTY_STMT; //stmt has no effect; drop it
             break;
         case VariableDeclarator: //{type, id, init{}, kind-inherited}
-            ast_node.init = reduce(ast_node.init, ast_node);
+            ast_node.init = reduce(ast_node.init, ast_node); //reduce init value first
 //                const type = (ast_node.kind == "const")? "consts": "vars";
 //            if (symtab[nameof(ast_node)]) throw `duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt;
 //            symtab[nameof(ast_node)] = (ast_node.kind == "const")? (isconst(ast_node.init)? makeconst(ast_node.init.value): ast_node.init): ast_node; //"TODO: eval?";
@@ -521,8 +521,8 @@ function reduce(ast_node, parent) //, symtab)
         case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
             if (nameof(ast_node) == "run") return NULL_EXPR.why("drop run"); //NULL_EXPR; //drop run-time sim logic
             const locals = ast_node.stack_frame(); //{context: Object.assign({}, ast_node.context || {})}; //shallow copy to new stack frame
-            (ast_node.params || []).forEach((param, inx, all) => { all[inx] = reduce(param, locals); }); //param2var(reduce(param)); }); //treat as defined vars
-            (ast_node.defaults || []).forEach((def, inx, all) => { all[inx] = reduce(def, locals); });
+            (ast_node.params || []).forEach((param, inx, all) => all[inx] = reduce(param, locals)); //param2var(reduce(param)); }); //treat as defined vars
+            (ast_node.defaults || []).forEach((def, inx, all) => all[inx] = reduce(def, locals));
             ast_node.body = reduce(ast_node.body, locals);
 //                console.error(`upon ${nameof(ast_node)} exit, local symbols are: ${Object.keys(locals).map((key) => { return `${symtype(locals[key])}:${key}`; })}`);
 //                console.error(`upon ${nameof(ast_node)} exit, parent symbols are: ${Object.keys(symtab).map((key) => { return `${symtype(symtab[key])}:${key}`; })}`);
@@ -556,7 +556,7 @@ function reduce(ast_node, parent) //, symtab)
             ast_node.test = reduce(ast_node.test, ast_node);
             ast_node.update = reduce(ast_node.update, ast_node);
             ast_node.body = reduce(ast_node.body, ast_node);
-            if (isconst0(ast_node.test)) return ast_node.init.why("for(;0;)"); //no body needed
+            if (isfalsey(ast_node.test)) return ast_node.init.why("for(;0;)"); //no body needed
             break;
         case ForInStatement: //{type, left{}, right{}, body{}}
             ast_node.left = reduce(ast_node.left, ast_node);
@@ -566,7 +566,7 @@ function reduce(ast_node, parent) //, symtab)
         case WhileStatement: //{type, test{}, body{}}
             ast_node.test = reduce(ast_node.test, ast_node);
             ast_node.body = reduce(ast_node.body, ast_node);
-            if (isconst0(ast_node.test)) return NULL_EXPR.why("while(0)"); //no body needed
+            if (isfalsey(ast_node.test)) return NULL_EXPR.why("while(0)"); //no body needed
             break;
         case UnaryExpression: //{type, operator, argument{}}
         case UpdateExpression: //{type, operator, argument{}, prefix}
@@ -576,38 +576,38 @@ function reduce(ast_node, parent) //, symtab)
         case YieldExpression: //{type, argument{}, delegate}
             ast_node.argument = reduce(ast_node.argument, ast_node);
             return ast_node.argument.why("drop 'yield'"); //drop yield and just use target function/expression
-            break;
+//            break;
 //node types as-is:
         case ObjectExpression: //{type, properties[]}
-            (ast_node.properties || []).forEach((prop, inx, all) => { all[inx] = reduce(prop, ast_node); });
+            (ast_node.properties || []).forEach((prop, inx, all) => all[inx] = reduce(prop, ast_node));
             break;
         case Property: //{type, key{}, computed, value{}, kind, method, shorthand}
             ast_node.key = reduce(ast_node.key, ast_node);
             ast_node.value = reduce(ast_node.value, ast_node);
             break;
         case ArrayExpression: //{type, elements[]}
-            (ast_node.elements || []).forEach((expr, inx, all) => { all[inx] = reduce(expr, ast_node); });
+            (ast_node.elements || []).forEach((expr, inx, all) => all[inx] = reduce(expr, ast_node));
             break;
         case ThrowStatement: //{type, argument{}}
         case ReturnStatement: //{type, argument{}}
             ast_node.argument = reduce(ast_node.argument, ast_node);
             break;
         case NewExpression: //{type, callee{}, arguments[]}
-            (ast_node.arguments || []).forEach((arg, inx, all) => { all[inx] = reduce(arg, ast_node); });
+            (ast_node.arguments || []).forEach((arg, inx, all) => all[inx] = reduce(arg, ast_node));
             ast_node.callee = reduce(ast_node.callee);
             break;
         case SwitchStatement: //{type, discriminant{}, cases[]}
             ast_node.discriminant = reduce(ast_node.discriminant, ast_node);
-            (ast_node.cases || []).forEach((casestmt, inx, all) => { all[inx] = reduce(casestmt, ast_node); });
+            (ast_node.cases || []).forEach((casestmt, inx, all) => all[inx] = reduce(casestmt, ast_node));
             if (isconst(ast_node.discriminant)) debug("TODO: reduce switch stmt".red_lt);
             break;
         case SwitchCase: //{type, test{}, consequent[]}
             ast_node.test = reduce(ast_node.test, ast_node);
-            (ast_node.consequent || []).forEach((conseq, inx, all) => { all[inx] = reduce(conseq, ast_node); });
+            (ast_node.consequent || []).forEach((conseq, inx, all) => all[inx] = reduce(conseq, ast_node));
             break;
         case TemplateLiteral: //{type, quasis[], expressions[]}
-            (ast_node.quasis || []).forEach((quasi, inx, all) => { all[inx] = reduce(quasi, ast_node); });
-            (ast_node.expressions || []).forEach((expr, inx, all) => { all[inx] = reduce(expr, ast_node); });
+            (ast_node.quasis || []).forEach((quasi, inx, all) => all[inx] = reduce(quasi, ast_node));
+            (ast_node.expressions || []).forEach((expr, inx, all) => all[inx] = reduce(expr, ast_node));
 //TODO                if (isconst(ast_node....)) console.error("TODO: reduce string".red_lt);
             break;
         case TemplateElement: //{type, value{}, tail}
@@ -653,7 +653,7 @@ function traverse(ast_node, context, emitter) //, nested)
         case CallExpression: //{type, callee{}, arguments[]}
             var locals = context; //.new_frame(); //dynamic nesting not supported
 //if (!(ast_node.arguments || []).forEach) debug(JSON.stringify(ast_node));
-            (ast_node.arguments || []).forEach((arg) => { traverse(arg, locals, emitter); });
+            (ast_node.arguments || []).forEach((arg) => traverse(arg, locals, emitter));
             traverse(ast_node.callee, locals, emitter);
 //            symtab[nameof(ast_node.callee)] = symtab[nameof(ast_node.callee)] || null; //create fwd ref if not defined yet
             context.symtab[nameof(ast_node.callee)] = context.symtab[nameof(ast_node.callee)] || UNDEF_FUNC; //create fwd ref if not defined yet
@@ -661,14 +661,14 @@ function traverse(ast_node, context, emitter) //, nested)
         case FunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
         case FunctionDeclaration: //{type, id{}, params[], defaults[], body{}, generator, expression}
         case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
-            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate func def: ${nameof(ast_node)}`.red_lt);
+            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate func def: '${nameof(ast_node)}' uid ${ast_node.uid}`.red_lt);
             var locals = context.new_frame(); //static nesting
-            (ast_node.params || []).forEach((param, inx, all) => { traverse(param2var(param), locals, emitter); }); //locals.symtab[nameof(param)] = param2var(param); }); //treat params as defined vars
-            (ast_node.defaults || []).forEach((def, inx, all) => { traverse(def, locals, emitter); });
+            (ast_node.params || []).forEach((param, inx, all) => traverse(param2var(param), locals, emitter)); //locals.symtab[nameof(param)] = param2var(param); }); //treat params as defined vars
+            (ast_node.defaults || []).forEach((def, inx, all) => traverse(def, locals, emitter));
             traverse(ast_node.body, locals, emitter);
 //                console.error(`upon ${nameof(ast_node)} exit, local symbols are: ${Object.keys(locals).map((key) => { return `${symtype(locals[key])}:${key}`; })}`);
 //                console.error(`upon ${nameof(ast_node)} exit, parent symbols are: ${Object.keys(symtab).map((key) => { return `${symtype(symtab[key])}:${key}`; })}`);
-            debug(`${numkeys(locals.symtab) - numkeys(context.symtab)} symbols defined/used in '${nameof(ast_node)}': ${Object.keys(locals.symtab).reduce((all_mine, key) => { if (!(key in context.symtab)) all_mine.push(`${symtype(locals.symtab[key])}:'${key}'`); return all_mine; }, []).join(", ")}`.cyan_lt); //NOTE: mine undef === null, sibling undef === false
+            debug(`${numkeys(locals.symtab) - numkeys(context.symtab)} symbols defined/used in '${nameof(ast_node)}' uid ${ast_node.uid}: \n${Object.keys(locals.symtab).reduce((all_mine, key) => { if (!(key in context.symtab)) all_mine.push(`${symtype(locals.symtab[key])}:'${key}'`); return all_mine; }, []).join(", ")}`.cyan_lt); //NOTE: mine undef === null, sibling undef === false
 //no, could be siblings, defined after                Object.keys(locals).forEach((key) => { if (!locals[key]) warn(`undefined symbol in '${nameof(ast_node)}': '${key}'`); }); //check for undefined stuff within this context
             Object.keys(locals.symtab).forEach((key) => { if (!locals.symtab[key]) context.symtab[key] = context.symtab[key] || locals.symtab[key]; }); //warn(`undefined symbol in '${nameof(ast_node)}': '${key}'`); }); //check for undefined stuff later within this context; defer to parent; skip "false", which were defered from a sibling/child
             context.symtab[nameof(ast_node)] = ast_node; //"TODO: func val?"; //update parent context
@@ -676,10 +676,10 @@ function traverse(ast_node, context, emitter) //, nested)
         case BlockStatement: //{type, body[]}
         case ClassBody: //{type, body[]
             var locals = context; //.new_frame(); //TODO: bump nesting level here for better var space usage?
-            (ast_node.body || []).forEach((stmt, inx, all) => { traverse(stmt, locals, emitter); });
+            (ast_node.body || []).forEach((stmt, inx, all) => traverse(stmt, locals, emitter));
             break;
         case VariableDeclarator: //{type, id, init{}, kind-inherited}
-            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt);
+            if (context.symtab[nameof(ast_node)]) /*throw*/ error(`duplicate ${ast_node.kind || "var?"} def: '${nameof(ast_node)}' uid ${ast_node.uid}`.red_lt);
 //            if (symtab[nameof(ast_node)]) throw `duplicate ${ast_node.kind || "var?"} def: ${nameof(ast_node)}`.red_lt;
 //            symtab[nameof(ast_node)] = (ast_node.kind == "const")? (isconst(ast_node.init)? makeconst(ast_node.init.value): ast_node.init): ast_node; //"TODO: eval?";
             context.symtab[nameof(ast_node)] = ast_node;
@@ -732,39 +732,39 @@ function traverse(ast_node, context, emitter) //, nested)
             traverse(ast_node.argument, context, emitter);
             break;
         case VariableDeclaration: //{type, declarations[], kind}
-            (ast_node.declarations || []).forEach((dcl, inx, all) => { traverse(dcl, context, emitter); });
+            (ast_node.declarations || []).forEach((dcl, inx, all) => traverse(dcl, context, emitter));
 //            if (context.symtab[nameof(ast_node)]) throw `duplicate var def: ${nameof(ast_node)}`.red_lt;
 //            context.symtab[nameof(ast_node)] = ast_node; //"TODO: func val?"; //update parent context
             break;
         case ObjectExpression: //{type, properties[]}
-            (ast_node.properties || []).forEach((prop, inx, all) => { traverse(prop, context, emitter); });
+            (ast_node.properties || []).forEach((prop, inx, all) => traverse(prop, context, emitter));
             break;
         case Property: //{type, key{}, computed, value{}, kind, method, shorthand}
             traverse(ast_node.key, context, emitter);
             traverse(ast_node.value, context, emitter);
             break;
         case ArrayExpression: //{type, elements[]}
-            (ast_node.elements || []).forEach((expr, inx, all) => { traverse(expr, context, emitter); });
+            (ast_node.elements || []).forEach((expr, inx, all) => traverse(expr, context, emitter));
             break;
         case ThrowStatement: //{type, argument{}}
         case ReturnStatement: //{type, argument{}}
             traverse(ast_node.argument, context, emitter);
             break;
         case NewExpression: //{type, callee{}, arguments[]}
-            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, context, emitter); });
+            (ast_node.arguments || []).forEach((arg, inx, all) => traverse(arg, context, emitter));
             traverse(ast_node.callee, context, emitter);
             break;
         case SwitchStatement: //{type, discriminant{}, cases[]}
             traverse(ast_node.discriminant, context, emitter);
-            (ast_node.cases || []).forEach((casestmt, inx, all) => { traverse(casestmt, context, emitter); });
+            (ast_node.cases || []).forEach((casestmt, inx, all) => traverse(casestmt, context, emitter));
             break;
         case SwitchCase: //{type, test{}, consequent[]}
             traverse(ast_node.test, context, emitter);
-            (ast_node.consequent || []).forEach((conseq, inx, all) => { traverse(conseq, context, emitter); });
+            (ast_node.consequent || []).forEach((conseq, inx, all) => traverse(conseq, context, emitter));
             break;
         case TemplateLiteral: //{type, quasis[], expressions[]}
-            (ast_node.quasis || []).forEach((quasi, inx, all) => { traverse(quasi, context, emitter); });
-            (ast_node.expressions || []).forEach((expr, inx, all) => { traverse(expr, context, emitter); });
+            (ast_node.quasis || []).forEach((quasi, inx, all) => traverse(quasi, context, emitter));
+            (ast_node.expressions || []).forEach((expr, inx, all) => traverse(expr, context, emitter));
             break;
         case TemplateElement: //{type, value{}, tail}
 //no; leaf node            traverse(ast_node.value, context, emitter);
@@ -780,7 +780,7 @@ function traverse(ast_node, context, emitter) //, nested)
         case Literal : //{type, value, raw}
             break;
         default: //for debug
-            /*throw*/ error(`AST traverse: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
+            /*throw*/ error(`AST traverse: unhandled node type '${`${ast_node.type}`.cyan_lt}' uid ${ast_node.uid}, parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
     }
 //    ast_node.nest = context.nest || 0; //send call-graph (nesting level) downstream
 //if (false)
@@ -807,7 +807,7 @@ function nameof(ast_node)
         case Super: //{type}
             return "super";
         default:
-            /*throw*/ error(`AST nameof: unhandled node type: '${JSON.stringify(ast_node, null, 2)}'`.red_lt); //for debug
+            /*throw*/ error(`AST nameof: unhandled node type: '${JSON.stringify(ast_node, null, 2)}' uid ${ast_node.uid}`.red_lt); //for debug
             return `unamed ${(ast_node || {type: "(no type)"}).type}`;
     }
 }
@@ -831,32 +831,48 @@ function nameof(ast_node)
 
 function makeconst(value)
 {
-    if (typeof value == "string")
-    {
+    if (typeof value == "string") value = eval(value);
+//    {
 //            console.error(`mkconst('${value}') = ${eval(value)}`);
-        value = eval(value);
-    }
+//        value = eval(value);
+//    }
     return new AstNode({type: Literal, value, raw: value, }); //allow caller to use .why()
 }
 
-function isconst0(ast_node) { return isconst(ast_node) && !ast_node.value; }
+function isfalsey(ast_node) { return isconst(ast_node) && !ast_node.value; }
 function isconst(ast_node)
 {
 //    ast_node = ast_node || {};
+/*
     if (!ast_node) return false;
     if (ast_node.type == Identifier) return nameof(ast_node) in (ast_node.context || {});
     return (ast_node.type == Literal);
+*/
 //        const CONST_TYPES = "Literal,"
 //    if ((ast_node || {}).type == Literal) return true;
 //        if ((ast_node || {}).kind == "const")
 //        if (((ast_node || {}).type == "Identifier") && (ast_node.name in this.consts)) return true;
 //    return false;
+    switch ((ast_node || {}).type)
+    {
+        case Identifier: return nameof(ast_node) in (ast_node.context || {});
+        case Literal: return true;
+        default: return false;
+    }
 }
 function getconst(ast_node)
 {
 //    if (!ast_node) return null;
+/*
     if (ast_node.type == Identifier) return (ast_node.context || {})[nameof(ast_node)];
     return (ast_node.type == Literal)? ast_node.value: null;
+*/
+    switch ((ast_node || {}).type)
+    {
+        case Identifier: return (ast_node.context || {})[nameof(ast_node)];
+        case Literal: return ast_node.value;
+        default: return null;
+    }
 }
 
 //var param ident in var decl:
@@ -1133,24 +1149,45 @@ function numkeys(thing) { return Object.keys(thing || {}).length; }
 //TODO: npm publish
 const parentify =
 module.exports.parentify =
-function parentify(node, filter, parent)
+function parentify(node, filter, label, parent) //, grparent)
 {
     if (node && (typeof node == "object")) //NOTE: typeof null = "object" :(
     {
+//const circJSON = require("circular-json");
+//try{
+        label = label || "parent";
 //    obj.parent = parent; //CAUTION: creates circular refs
 //        if (parent)
-        if (!filter || filter(node)) Object.defineProperty(node, "parent", {value: parent}); //!enumerable, !writable; CAUTION: creates circular refs
+        if (!filter || filter(node)) //tag this node
+//            if (!Object.hasOwnProperty(node, label)) //only do it first time (same)
+                Object.defineProperty(node, label, {value: parent, enumerable: true}); //!enumerable, !writable; CAUTION: creates circular refs
+//            else if (isNaN(++node[`${label}-count`])) node[`${label}-count`] = 2;
+//}catch(exc){ debug(circJSON.stringify(node), `exc ${exc}`.red_lt); }
 //    for (var i in obj)
 //    {
 //        if (typeof obj[i] == "object") obj[i].parent = obj;
 //        parent_tags(obj[i], obj);
 //    }
 //debug(typeof node, node == undefined, node === null); //Object.keys(node).length);
-        Object.keys(node).forEach((key) => parentify(node[key], filter, node)); //CAUTION: recursion
+        Object.keys(node).forEach((key) => parentify(node[key], filter, label, node)); //CAUTION: recursion
+//        Object.keys(node).forEach((key) => 
+//        {
+//            if ((node[key] || {}).uid == 62.1) debug(typeof node.length, node.length, JSON.stringify(clone(node, 2), null, 2));
+//        });
     }
     return node; //fluent
 }
 
+
+//deep copy:
+function clone(obj, max_depth)
+{
+//no    JSON.parse(JSON.stringify(obj)); //only copies one level deep
+//    if (typeof obj != "obj") return (max_depth > 0)? obj: "[TOO DEEP]";
+    const retval = {};
+    Object.keys(obj).forEach((key) => retval[key] = (!obj[key] || (typeof(obj[key]) != "object"))? obj[key]: max_depth? clone(obj[key], max_depth - 1): "[TOO DEEP]");
+    return retval;
+}
 
 //give each node a unique id# for easier debug:
 //const uniqify =
@@ -1364,10 +1401,10 @@ function dsl_CLI(more_opts)
 //        .on("astnode", data => { console.error(`ast node: ${JSON5.stringify(data)}`.cyan_lt)})
 //??        .pipe(outstrm)
 //        .on("data", (data) => { console.error(`data: ${data}`.blue_lt)})
-        .on("finish", () => { eof("finish"); })
-        .on("close", () => { eof("close"); })
-        .on("done", () => { eof("done"); })
-        .on("end", () => { eof("end"); })
+        .on("finish", () => eof("finish"))
+        .on("close", () => eof("close"))
+        .on("done", () => eof("done"))
+        .on("end", () => eof("end"))
         .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); });
 //    debug("DSL engine: finish asynchronously".green_lt);
 //    retstrm.emit("dsl-opts", opts);

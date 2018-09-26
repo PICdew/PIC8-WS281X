@@ -14,6 +14,7 @@
   "dependencies": {
     "byline": "^5.0.0",
     "capture-console": "^1.0.1",
+    "circular-json": "^0.5.7",
     "colors": "git+https://github.com/djulien/colors.js.git",
     "combined-stream2": "^1.1.2",
     "duplex-stream": "^0.1.0",

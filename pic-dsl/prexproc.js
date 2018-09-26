@@ -64,7 +64,7 @@ Object.defineProperty(debug, "enabled",
     {
 //console.error(`debug.enabled <- ${typeof onoff} ${JSON5.stringify(onoff)} ${srcline()}`.blue_lt);
 //console.error(JSON5.stringify(this.bufs, null, "  "), srcline());
-        if (/*Array.isArray*/ (this.bufs || {}).forEach) this.bufs.forEach((args) => { console.error.apply(console, args); }); //flush buffers; duck typing
+        if (/*Array.isArray*/ (this.bufs || {}).forEach) this.bufs.forEach((args) => console.error.apply(console, args)); //flush buffers; duck typing
         this.bufs = onoff; //Array.isArray(onoff)? onoff: ; //? (this.bufs || []): null; //turn buffering on/off
     },
 });
@@ -363,7 +363,7 @@ function shebang_args(str)
 //    {
 //        var match = XRegExp.exec(` ${str}` || "", KEEP_xre); //, ofs, "sticky");
 //        if (!match) break;
-    XRegExp.forEach(str || "", KEEP_xre, (match, inx) => { matches.push(match.argstr); }); //debug(`#![${inx}]: '${match[0]}' ${match.index}`); //no-kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
+    XRegExp.forEach(str || "", KEEP_xre, (match, inx) => matches.push(match.argstr)); //debug(`#![${inx}]: '${match[0]}' ${match.index}`); //no-kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
 //    {
 //        debug(`match[${inx}]:`.blue_lt, JSON.stringify(match), match.trimmed.quoted.cyan_lt); //, ${"quostr".cyan_lt} '${match.quostr}', ${"barestr".cyan_lt} '${match.barestr}'`);
 //        matches.push(match.trimmed); //kludge: exclude surrounding spaces, which are included even though non-captured; //`${match.quostr || match.barestr}`); // || ""}`);
@@ -657,7 +657,7 @@ if (false)            this.pause(); //no-; pause flow of input stream until nest
 //                .pipe(LineStream(opts)) //NOTE: stream needs to be read by line for #directives to be handled correctly
 //                .pipe(Object.assign(thru2(/*{objectMode: false},*/ preproc_xform, preproc_flush), {opts, /*pushline,*/ })) //eof: preproc_eof, })) //attach opts to stream for easier access across scope
                 .pipe(regexproc(opts))
-                .on("data", (buf) => { this.push(buf); }) //as-is; linefeed was already added; //debug(`got-${nested_strm.filename} '${buf}'`.cyan_lt, this === THIS); THIS.push(buf); })
+                .on("data", (buf) => this.push(buf)) //as-is; linefeed was already added; //debug(`got-${nested_strm.filename} '${buf}'`.cyan_lt, this === THIS); THIS.push(buf); })
 //                {
 //                    this.push(buf);
 //                    nested_strm.pause();
@@ -667,8 +667,8 @@ if (false)            this.pause(); //no-; pause flow of input stream until nest
 //                        nested_strm.resume();
 //                    });
 //                })
-                .on("end", () => { inner_eof.call(this); })
-                .on("error", (err) => { inner_eof.call(this, err); });
+                .on("end", () => inner_eof.call(this))
+                .on("error", (err) => inner_eof.call(this, err));
             return; //NOTE: don't call cb() until nested file eof
         }
     }
@@ -995,7 +995,7 @@ function define(linebuf, where)
     {
         xre: new XRegExp(`
             \\b ${parts.name} \\b  #macro name, word boundary or start/end of string
-            ${parts.params? `\\( \\s* ${parts.params.map((param, inx) => { return `(?<${param}> [^,)]* )`; }).join("\\s*,\\s*")} \\s* \\)`: ""}  #TODO: __VARARGS__, ignore extra args
+            ${parts.params? `\\( \\s* ${parts.params.map((param, inx) => `(?<${param}> [^,)]* )`).join("\\s*,\\s*")} \\s* \\)`: ""}  #TODO: __VARARGS__, ignore extra args
             `, "xg"), //.echo_stderr("macro xre"), "xg"),
 //        re_string: 
         args_xre: parts.params && parts.params.reduce((dict, name) => { dict[name] = XRegExp(`\\b ${name} \\b`.echo_stderr(`arg[${name}] xre`), "gx"); return dict; }, {}), //|| null,
@@ -1350,6 +1350,11 @@ function color_reset(str, color)
 }
 
 
+function CamelCase(str)
+{
+    return (str || "").replace(/([a-z])((\w|-)+)/gi, (match, first, other) => `${first.toUpperCase()}${other.toLowerCase()}`);
+}
+
 //return "file:line#":
 //mainly for debug or warning/error messages
 function srcline(depth)
@@ -1494,6 +1499,7 @@ function extensions()
 //        return (this.sv_stringify.apply(JSON5, arguments) || "").replace(/,(?=\w)/gi, ", ").replace(/:/g, ": "); //put a space after ",:" for easier readability
 //    }
 //    const JSON5 = require("json5"); //more reader-friendly JSON; doesn't need to be visible to wider scope since we are replacing built-in JSON.stringify; https://github.com/json5/json5
+//    const circJSON = require("circular-json");
     JSON.saved_stringify = JSON.stringify;
     JSON.stringify = function(args)
     {
@@ -1686,10 +1692,10 @@ function regexproc_CLI(opts)
         .pipe(regexproc(opts)) //: new PassThrough())
         .emit_fluent_delayed("args", downstream_args)
 //        .on("data", (data) => { debug(`data: ${data}`.blue_lt)}) //CAUTION: pauses flow
-        .on("finish", () => { eof("finish"); })
-        .on("close", () => { eof("close"); })
-        .on("done", () => { eof("done"); })
-        .on("end", () => { eof("end"); })
+        .on("finish", () => eof("finish"))
+        .on("close", () => eof("close"))
+        .on("done", () => eof("done"))
+        .on("end", () => eof("end"))
         .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); });
 //    debug("preproc: finish asynchronously".green_lt);
 //    retstrm.emit("dsl-opts", opts);

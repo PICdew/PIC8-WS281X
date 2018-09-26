@@ -33,7 +33,8 @@ function MPU(opts)
 
     function constructor(opts)
     {
-        this.opts = parentify(Object.assign({}, opts || {})); //shallow copy, add parent refs
+//debug(JSON.stringify(opts));
+        this.opts = parentify(Object.assign({}, opts || {})); //, null, "parent_reg"); //shallow copy, add parent refs
         defaults.call(this);
 //console.error("mpu here3");
 //console.error(JSON.stringify(this.opts));
