@@ -5,7 +5,7 @@
 //require("magic-globals"); //__file, __line, __func, etc
 //require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 //const JSON5 = require("json5");
-console.log("opts: " + JSON.stringify(opts));
+console.log("opts: " + JSON.stringify(opts, null, 2));
 
 #ifdef XYZ
  #warning `XYZ = '${XYZ}'`

@@ -148,7 +148,7 @@ function process_node(ast_node, /*state,*/ opts)
                 key? `[${key.toUpperCase()}]`:
                 value;
         }
-        debug("PIC8", `parent ${(ast_node.parent || {}).type}`.blue_lt, JSON.stringify(ast_node, show_object_placeholder).blue_lt);
+        debug("PIC8", `parent ${(ast_node.parent || {}).type || `ary-${(ast_node.parent || []).length}`}`.blue_lt, JSON.stringify(ast_node, show_object_placeholder).blue_lt);
     }
 //    return ast_node;
 //    return true; //continue processing

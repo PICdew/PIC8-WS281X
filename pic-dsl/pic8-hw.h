@@ -34,12 +34,15 @@ function MPU(opts)
     function constructor(opts)
     {
 //debug(JSON.stringify(opts));
+//debugger;
         this.opts = parentify(Object.assign({}, opts || {})); //, null, "parent_reg"); //shallow copy, add parent refs
         defaults.call(this);
 //console.error("mpu here3");
 //console.error(JSON.stringify(this.opts));
 //console.error(`this is a ${typeof this}, ${this.constructor.name}, is MPU? ${this instanceof MPU}`);
 //validate memory defs:
+//debug(Object.keys(this.opts.banks).join(","));
+//process.exit(0);
         for (var b in this.opts.banks || {})
 //        Object.keys(this.opts.banks).forEach((b, inx, all) =>
         {

@@ -231,10 +231,12 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            }
 //debugger; //c = continue, n = step next, s = step in, o = step out, pause, run, repl, exec, kill, scripts, version, help
         const ast_raw = new AstNode(toAST(module)).add_ident("DSL_top"); //make it easier to identify in debug/error messages
-        parentify(ast_raw, (ast_node) =>
+        parentify(ast_raw, (ast_node, parent) =>
         {
-            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 0.1; //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
+//            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 0.1; //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
+            ast_node.uid = ++parentify.uid || (parentify.uid = 0.1); //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
 //            ast_node.uid += 0.1; //`${ast_node.uid}$`; //make text search easier (for debug)
+            ast_node.parent_uid = (parent || {}).uid; //debug only
             return (ast_node || {}).type || (ast_node || []).length; //add parent refs to all ast nodes that have a type or length (array)
         });
         if (opts.ast) fs.createWriteStream(`${opts.filename || "stdin"}-ast.txt`) //console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
@@ -881,7 +883,9 @@ function param2var(param_node)
 {
 //    return new AstNode({type: VariableDeclarator, id: param_node, init: null, kind: "var"});
 //    return new AstNode({type: VariableDeclarator, kind: "var", }).add_ident(param_node.name);
-    return {type: VariableDeclarator, id: param_node, kind: "var-param", uid: param_node.uid || -2};
+    const retval = {type: VariableDeclarator, id: param_node, kind: "var-param", uid: param_node.uid || -2, parent_uid: param_node.parent_uid, };
+    Object.defineProperty(retval, "parent", {value: param_node.parent, }); //non-enumerable
+    return retval;
 }
 
 function symtype(ast_node)
@@ -1149,8 +1153,9 @@ function numkeys(thing) { return Object.keys(thing || {}).length; }
 //TODO: npm publish
 const parentify =
 module.exports.parentify =
-function parentify(node, filter, label, parent) //, grparent)
+function parentify(node, filter, label, parent) //, key) //, depth) //, grparent)
 {
+//    if (depth > 4) return debug("too deep".red_lt);
     if (node && (typeof node == "object")) //NOTE: typeof null = "object" :(
     {
 //const circJSON = require("circular-json");
@@ -1158,22 +1163,27 @@ function parentify(node, filter, label, parent) //, grparent)
         label = label || "parent";
 //    obj.parent = parent; //CAUTION: creates circular refs
 //        if (parent)
-        if (!filter || filter(node)) //tag this node
+        if (!filter || filter(node, parent)) //tag this node
 //            if (!Object.hasOwnProperty(node, label)) //only do it first time (same)
-                Object.defineProperty(node, label, {value: parent, enumerable: true}); //!enumerable, !writable; CAUTION: creates circular refs
+//            if (!node[label])
+            Object.defineProperty(node, label, {value: parent}); //CAUTION: if enumerable must be excluded from key loop below; //, enumerable: true}); //!enumerable, !writable; CAUTION: creates circular refs
+//            else if (!++node.DUPL_PARENT) node.DUPL_PARENT = 1; //debug("dupl parent".red_lt);
+//            else if (node.DUPL_PARENT > 10) return;
 //            else if (isNaN(++node[`${label}-count`])) node[`${label}-count`] = 2;
-//}catch(exc){ debug(circJSON.stringify(node), `exc ${exc}`.red_lt); }
+//}catch(exc){ debug(circJSON.stringify(node).red_lt, `exc ${exc}`.red_lt); }
 //    for (var i in obj)
 //    {
 //        if (typeof obj[i] == "object") obj[i].parent = obj;
 //        parent_tags(obj[i], obj);
 //    }
 //debug(typeof node, node == undefined, node === null); //Object.keys(node).length);
-        Object.keys(node).forEach((key) => parentify(node[key], filter, label, node)); //CAUTION: recursion
+//debug(key || "UNNAMED", Object.keys(node).map((key) => `${key} = ${typeof node[key]}: ${node[key]}`).join(","));
+        Object.keys(node).forEach((key) => parentify(node[key], filter, label, node)); //, key)); //, (depth || 0) + 1)); //CAUTION: recursion
 //        Object.keys(node).forEach((key) => 
 //        {
 //            if ((node[key] || {}).uid == 62.1) debug(typeof node.length, node.length, JSON.stringify(clone(node, 2), null, 2));
 //        });
+//debug(`parentify: ${circJSON.stringify(node)}`);
     }
     return node; //fluent
 }
@@ -1368,7 +1378,8 @@ function dsl_CLI(more_opts)
                 if (propname == "changes") { target.changes = newvalue; return true; } //kludge: allow caller to mess with tracked changes
                 target[propname] = newvalue;
                 if (!target.changes) Object.defineProperty(target, "changes", {value: {}, writable: true, }); //defaults to !changeable, !enumerable
-                if (isNaN(++target.changes[propname])) target.changes[propname] = 1; //count #changes
+//                if (isNaN(++target.changes[propname])) target.changes[propname] = 1; //count #changes
+                ++target.changes[propname] || (target.changes[propname] = 1); //count #changes
                 return true; //assigned successfully
             },
         });

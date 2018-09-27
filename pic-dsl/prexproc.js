@@ -78,7 +78,8 @@ function debug_nested(depth, args)
     if (!debug.enabled) return;
 //    console.error.apply(console, shift_fluent(push_fluent(Array.from(arguments), srcline(depth))); //NOTE: stderr keeps diagnostics separate from preprocessor output (stdout)
 //    return debug_nested; //fluent
-    if (isNaN(++depth)) depth = 1;
+//    if (isNaN(++depth)) depth = 1;
+    ++depth || (depth = 1);
 //    args = Array.from(arguments).shift_fluent()/*drop depth*/.push_fluent(srcline(depth));
     args = push_fluent(shift_fluent(Array.from(arguments)), srcline(depth)); //exclude depth, append srcline info
 //if (!Array.isArray(args)) throw "bad ary".red_lt;
@@ -192,7 +193,8 @@ function echo_stream(opts)
 
     function xform(chunk, enc, cb)
     {
-        if (isNaN(++this.numlines)) this.numlines = 1;
+//        if (isNaN(++this.numlines)) this.numlines = 1;
+        ++this.numlines || (this.numlines = 1);
 //debug(`here4 ${this.numlines}`);
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //        chunk = chunk.replace(/\n/g, "\\n");
@@ -265,7 +267,8 @@ function shebang(opts)
 #            )
 #            \\n?
             `, "x"); //NOTE: real shebang doesn't allow white space
-        if (isNaN(++this.numchunks)) this.numchunks = 1;
+//        if (isNaN(++this.numchunks)) this.numchunks = 1;
+        ++this.numchunks || (this.numchunks = 1);
         if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //debug(`shebang[${this.numlines}]: '${chunk.escnl}'`); //replace(/\n/g, "\\n")}'`);
 //        if (!opts.shebang && !this.chunks.length && chunk.match(/^\s*#\s*!/)) { this.chunks.push(`//${chunk} //${chunk.length}:line 1`); cb(); return; } //skip shebang; must occur before prepend()
@@ -533,7 +536,8 @@ function preproc_xform(chunk, enc, cb)
 //    const state = opts.state.top;
 //    opts.preprocessed = true;
 //        if (!this.chunks) this.chunks = [];
-    if (isNaN(++opts.file_state.numlines)) opts.file_state.numlines = 1; //NOTE: input must be split by newlines
+//    if (isNaN(++opts.file_state.numlines)) opts.file_state.numlines = 1; //NOTE: input must be split by newlines
+    ++opts.file_state.numlines || (opts.file_state.numlines = 1); //NOTE: input must be split by newlines
     if (typeof chunk != "string") chunk = chunk.toString(); //TODO: enc?
 //no    chunk += "\n"; //add newlines back after byline stripped them
     if (chunk.slice(-1) == "\n") chunk = chunk.slice(0, -1); //drop newline to simplify linebuf handling
@@ -910,7 +914,8 @@ module.exports.macros = {};
 function expand_macros(linebuf)
 {
     const macros = module.exports.macros;
-    if (isNaN(++expand_macros.calls)) { expand_macros.calls = 1; expand_macros.body_substs = expand_macros.arg_substs = expand_macros.perf_time = 0; }
+//    if (isNaN(++expand_macros.calls)) { expand_macros.calls = 1; expand_macros.body_substs = expand_macros.arg_substs = expand_macros.perf_time = 0; }
+    ++expand_macros.calls || (expand_macros.calls = 1, expand_macros.body_substs = expand_macros.arg_substs = expand_macros.perf_time = 0);
     expand_macros.perf_time -= process.hrtime.bigint();
 //keep expanding until nothing found:
 //if (false)
@@ -1180,7 +1185,8 @@ function quostr(name)
       |
         \n  #just match newline on non-comment lines
         `, "xg");
-    if (isNaN(++quostr.count)) quostr.count = 1; //use unique name each time in case multiple included within same parent regex
+//    if (isNaN(++quostr.count)) quostr.count = 1; //use unique name each time in case multiple included within same parent regex
+    ++quostr.count || (quostr.count = 1); //use unique name each time in case multiple included within same parent regex
 //CAUTION: use "\\" because this is already within a string
     return `
 #        \\s*  #skip leading white space
@@ -1363,7 +1369,7 @@ function srcline(depth)
 //    if (isNaN(++depth)) depth = 1; //skip this function level
     const frame = __stack[Math.abs(depth || 0) + 1]; //skip this stack frame
 //console.error(`filename ${frame.getFileName()}`);
-    return `@${(want_path? nop: pathlib.basename)(frame.getFileName()/*.unquoted || frame.getFileName()*/, ".js")}:${frame.getLineNumber()}`; //.gray_dk; //.underline;
+    return `@${(want_path? nop_fluent: pathlib.basename)(frame.getFileName()/*.unquoted || frame.getFileName()*/, ".js")}:${frame.getLineNumber()}`; //.gray_dk; //.underline;
 //    return `@${pathlib.basename(__stack[depth].getFileName(), ".js")}:${__stack[depth].getLineNumber()}`;
 }
 
@@ -1391,7 +1397,8 @@ const error =
 module.exports.error =
 function error(msg)
 {
-    if (isNaN(++error.count)) error.count = 1;
+//    if (isNaN(++error.count)) error.count = 1;
+    ++error.count || (error.count = 1);
     console.error(`[ERROR] ${msg} ${srcline(1)}`.red_lt);
 }
 
@@ -1400,7 +1407,8 @@ const warn =
 module.exports.warn =
 function warn(msg)
 {   
-    if (isNaN(++warn.count)) warn.count = 1;
+//    if (isNaN(++warn.count)) warn.count = 1;
+    ++warn.count || (warn.count = 1);
     console.error(`[WARNING] ${msg} ${srcline(1)}`.yellow_lt);
 }
 
@@ -1433,7 +1441,7 @@ function pct(num, den)
 
 
 //placeholder function:
-function nop(arg) { return arg; }
+function nop_fluent(arg) { return arg; }
 
 
 function pushline(str)
@@ -1465,8 +1473,8 @@ function extensions()
 {
 //    if (extensions.installed) return; //1x only
 //    extensions.installed = true;
-    if (isNaN(++extensions.count)) extensions.count = 1;
-    debug(`extensions installed ${extensions.count}x`.green_lt); //should only be
+//    if (isNaN(++extensions.count)) extensions.count = 1;
+    debug(`extensions installed ${++extensions.count || (extensions.count = 1)}x`.green_lt); //should only be
 //console.error(debug? `debug already defined: ${debug.toString().slice(0, 100)} ...`.green_lt: "no debug yet".red_lt, srcline());
 //    if (!debug) debug = function(args) { console.error.apply(console, Array.from(arguments).push_fluent(__srcline)); } //in case debug() not defined yet
 //magic globals:
@@ -1513,7 +1521,7 @@ function extensions()
 //        const want_fixup = (arguments.length < 2) && "replace"; //leave as-is if caller is using custom fmter
         return (JSON.saved_stringify.apply(JSON, arguments) || "")
 //            .replace(/"(\w+)":/g, want_fixup? "$1: ": "$1:") //remove quotes from key names, put space after if no fmter passed in
-//            /*.replace*/ [want_fixup || "nop"](/,(?=\w)/gi, ", "); //also put a space after "," for easier readability
+//            /*.replace*/ [want_fixup || "nop_fluent"](/,(?=\w)/gi, ", "); //also put a space after "," for easier readability
             .replace(/"(\w+)":/g, "$1: ") //remove quotes from key names, put space after if no fmter passed in
             .replace(/,(?=\w)/gi, ", "); //also put a space after "," for easier readability
 }
@@ -1529,7 +1537,7 @@ function extensions()
 //    String.prototype.unquote = function(quotype) { return unquote(this/*.toString()*/, quotype); }
 //conflict with prop:    String.prototype.color_reset = function(color) { return color_reset(this.toString(), color); }
     String.prototype.echo_stderr = function(desc, depth) { console.error(`${desc || "echo_stderr"} ${srcline(1 + (depth || 0))}`, this/*.toString()*/); return this; }
-    String.prototype.nop = function() { return this; } //for conditional fmting (fluent)
+//    String.prototype.nop_fluent = function() { return this; } //for conditional fmting (fluent)
 //define parameter-less functions as properties:
     Object.defineProperties(String.prototype,
     {
@@ -1584,6 +1592,7 @@ function regexproc_CLI(opts)
 //    debug.buffered = true; //collect output until debug option is decided (options can be in any order)
     const startup_code = [];
     const downstream_args = [];
+    debug(`node.js version: ${JSON.stringify(process.versions, null, 2)}`.cyan_lt);
 //    process.argv_unused = {};
     for (var i = 0; i < process.argv.length; ++i)
         ((i == 2)? shebang_args(process.argv[i]): [process.argv[i]]).forEach((arg, inx, all) => //shebang might also have args (need to split and strip comments)
