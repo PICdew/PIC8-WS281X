@@ -225,35 +225,20 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            if (opts.run) //always run module so load-time logic will execute; -run flag will control nested debug/sim via suffix
 //            {
 //            console.error("run ...".green_lt);
-        module(); //execute load-time logic; alsoo start run-time sim if -run flag is present (see suffix)
+        module(); //execute load-time logic; start run-time sim if -run flag is present (see suffix)
         delete global.opts;
 //            console.error("... ran".red_lt);
 //            }
 //debugger; //c = continue, n = step next, s = step in, o = step out, pause, run, repl, exec, kill, scripts, version, help
-//        const ast_raw = new AstNode(toAST(module)).add_ident("DSL_top"); //make it easier to identify in debug/error messages
-        const ast_raw = add_ident(toAST(module), "DSL_top"); //give top level a name if none
-//dumb traversal (no semantic knowledge):
-        ast_raw.scope = {}; //global (outer) scope (symbol table)
-//        ast_raw.node_inx = [ast_raw]; //reserve uid 0 for self (root)
+        const ast_raw = new AstNode(toAST(module)).add_ident("DSL_top"); //make it easier to identify in debug/error messages
         parentify(ast_raw, (ast_node, parent) =>
         {
 //            if (isNaN(ast_node.uid = ++parentify.uid)) ast_node.uid = parentify.uid = 0.1; //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
-            ast_node.uid = ++ast_raw.node_count || (ast_raw.node_count = 1); //0.1); //assign unique id# to each node for easier debug; decimal allows easier text editor search for exact value rather than substrings (if uid is last key in node, no trailing comma)
-//            ast_node.uid = ast_raw.node_inx.length;
-            ast_node.parent_uid = (parent || {}).uid; //only for debug; //no-allow back-track; mainly used for denug, though
-            Object.defineProperty(ast_node, "scope", //CAUTION: hide from key loop in parentify to avoid infinite loop on circular refs
-            {
-                value: isscope(ast_node)? //local vs. parent/global scope
-                    (parent || ast_raw).scope:
-                    Object.assign({"scope#": ++ast_raw.scope_count || (ast_raw.scope_count = 1)}, (parent || ast_raw).scope), //shallow copy; want to share refs, just not keys; //no-new Proxy(ast_node.scope,
-            });
-//            ast_raw.node_inx.push(ast_node); //allow random access to AST by node uid (avoids circular refs)
+            ast_node.uid = ++parentify.uid || (parentify.uid = 0.1); //assign unique id# to each node for easier debug; decimal allows text editor search for exact value rather than substring
 //            ast_node.uid += 0.1; //`${ast_node.uid}$`; //make text search easier (for debug)
-            ast_node.scope[nameof(ast_node, true)] = ast_node; //store symbol defs (vars, funcs) for quick access
+            ast_node.parent_uid = (parent || {}).uid; //debug only
             return (ast_node || {}).type || (ast_node || []).length; //add parent refs to all ast nodes that have a type or length (array)
-//            return false; //don't need direct parent refs; use parent_uid instead (to avoid circular refs within AST)
         });
-        debug(`${ast_raw.node_count} AST nodes indexed, ${ast_raw.scope_count} local scopes used`);
         if (opts.ast) fs.createWriteStream(`${opts.filename || "stdin"}-ast.txt`) //console.error(JSON5.stringify(ast_raw, null, "  ")); //show raw AST; TODO: make this more stream-friendly?
             .on("finish", () => debug(`dsl finished writing ast to ${opts.filename || "stdin"}-ast.txt`.green_lt))
             .end(JSON.stringify(ast_raw, null, 2)); //show raw AST + close
@@ -262,8 +247,7 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            this.funcs = {};
 //            this.consts = {};
 //cb(); return;
-/*
-        const ast = opts.reduce? reduce(ast_raw, {}): ast_raw;
+        const ast = opts.reduce? reduce(ast_raw): ast_raw;
         if (opts.ast && opts.reduce)
         {
             if (opts.debug) debug(`${numkeys(ast.context)} consts during reduce: ${Object.keys(ast.context || {}).join(", ")}`.blue_lt);
@@ -282,7 +266,6 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //            console.error(`walked ast`);
 //            console.error(`${Object.keys(this.vars).length} vars: ${Object.keys(this.vars).join(", ")}`);
 //            console.error(`${Object.keys(this.funcs).length} funcs: ${Object.keys(this.funcs).map((key) =>
-============
         const stack = {symtab: {}};
         stack.new_frame = function()
         {
@@ -299,7 +282,6 @@ function js2ast(opts) //{filename, replacements, prefix, suffix, echo, debug, ru
 //        if (opts.traverse) opts.traverse(ast.body, opts); //strip off wrapper before passing to custom DSL processor
 //            else this.push("TODO: code gen\n");
 //            compiled.execode
-*/
         cb();
     }
 }
@@ -368,7 +350,6 @@ const Super = "Super"; //{type}
 
 
 //add some props and methods to raw AST nodes:
-/*
 const AstNode =
 module.exports.AstNode =
 function AstNode(props, parent)
@@ -377,7 +358,7 @@ function AstNode(props, parent)
 //    if (!(this instanceof AstNode)) return new AstNode(opts, parent);
 //    if (!(this instanceof AstNode)) return Object.create(AstNode.prototype, opts);
     return Object.assign((this instanceof AstNode)? this: Object.create(AstNode.prototype), props, {uid: -1});
-/-*
+/*
     if (this instanceof AstNode) return this;
 //    {
         opts.prototype = AstNode; //make it a typed object
@@ -385,7 +366,7 @@ function AstNode(props, parent)
 //    }
 //    Object.assign(this, opts || {});
 //    this.consts = this.consts || {}; //used for const expr reduction
-*-/
+*/
 }
 AstNode.prototype.stack_frame = function() { return {context: Object.assign({}, this.context)}; } //shallow copy to new stack frame
 //set additional props (all fluent):
@@ -394,13 +375,6 @@ AstNode.prototype.add_ident = function(name) { this.id = this.id || {type: Ident
 AstNode.prototype.assn_value = function(val) { this.operator = "="; this.right = makeconst(val); return this; }
 AstNode.prototype.add_const = function(val) { this.context = this.context || {}; this.context[nameof(this)] = val; return this; }
 //AstNode.prototype.set_context = function(parent, force) { if (!this.context || force) this.context = parent.context; return this; }
-*/
-//AstNode.prototype.why = function(comment) { this.comment = comment; return this; }
-function add_ident(ast_node, name) { ast_node.id = ast_node.id || {type: Identifier, name}; return ast_node; }
-//AstNode.prototype.assn_value = function(val) { this.operator = "="; this.right = makeconst(val); return this; }
-//AstNode.prototype.add_const = function(val) { this.context = this.context || {}; this.context[nameof(this)] = val; return this; }
-//AstNode.prototype.set_context = function(parent, force) { if (!this.context || force) this.context = parent.context; return this; }
-
 
 /*
 const walkAST =
@@ -461,7 +435,7 @@ function walkAST(opts) //{}
 //optimization:
 //coalesce compile-time constants, drop extraneous code, etc.
 //NOTE: this is an optional pass; caller can disable so ast traversal later should not depend on reduce()
-function reduce(ast_node, symtab) //parent) //, symtab)
+function reduce(ast_node, parent) //, symtab)
 {
 //        const EMPTY_STMT = {type: "EmptyStatement"};
     const NULL_EXPR = makeconst(null); //{type: "Literal", value: null, raw: null};
@@ -470,7 +444,7 @@ function reduce(ast_node, symtab) //parent) //, symtab)
 
 //TODO: inline short or explicitly requested functions
     if (!ast_node) return;
-//    ast_node = AstNode(ast_node, parent); //add helper methods
+    ast_node = AstNode(ast_node, parent); //add helper methods
     switch (ast_node.type)
     {
 //node types with optimization:
@@ -820,13 +794,13 @@ function traverse(ast_node, context, emitter) //, nested)
 }
 
 
-function nameof(ast_node, want_defs)
+function nameof(ast_node)
 {
 //    ast_node = ast_node || {};
     switch ((ast_node || {}).type)
     {
         case MemberExpression: //{type, computed, object{}, property{}}
-            return !want_defs && `${ast_node.object.name}.${ast_node.property.name}`;
+            return `${ast_node.object.name}.${ast_node.property.name}`;
         case VariableDeclarator: //{type, id, init{}, kind-inherited}
             return ast_node.id.name;
         case FunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
@@ -834,11 +808,10 @@ function nameof(ast_node, want_defs)
         case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
             return (ast_node.id || {name: "UNNAMED"}).name;
         case Identifier: //{type, name}
-            return !want_defs && ast_node.name;
+            return ast_node.name;
         case Super: //{type}
-            return !want_defs && "super";
+            return "super";
         default:
-            if (want_defs) return;
             /*throw*/ error(`AST nameof: unhandled node type: '${JSON.stringify(ast_node, null, 2)}' uid ${ast_node.uid}`.red_lt); //for debug
             return `unamed ${(ast_node || {type: "(no type)"}).type}`;
     }
@@ -868,7 +841,7 @@ function makeconst(value)
 //            console.error(`mkconst('${value}') = ${eval(value)}`);
 //        value = eval(value);
 //    }
-    return /*new AstNode*/({type: Literal, value, raw: value, }); //allow caller to use .why()
+    return new AstNode({type: Literal, value, raw: value, }); //allow caller to use .why()
 }
 
 function isfalsey(ast_node) { return isconst(ast_node) && !ast_node.value; }
@@ -916,28 +889,6 @@ function param2var(param_node)
     const retval = {type: VariableDeclarator, id: param_node, kind: "var-param", uid: param_node.uid || -2, parent_uid: param_node.parent_uid, };
     Object.defineProperty(retval, "parent", {value: param_node.parent, }); //non-enumerable
     return retval;
-}
-
-//check if an AST node starts new scope level:
-function isscope(ast_node)
-{
-    switch ((ast_node || {}).type)
-    {
-//functions start nested scope:
-        case FunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
-        case FunctionDeclaration: //{type, id{}, params[], defaults[], body{}, generator, expression}
-        case ArrowFunctionExpression: //{type, id{}, params[], defaults[], body{}, generator, expression}
-            return true;
-//class starts new scope also:
-        case ClassBody: //{type, body[]
-            return true;
-//C/C++ block statements start new scope, but Javascript doesn't:
-//leave this is or comment out as desired
-        case BlockStatement: //{type, body[]}
-            return true;
-        default:
-            return false;
-    }
 }
 
 function symtype(ast_node)
