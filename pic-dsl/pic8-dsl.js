@@ -4,7 +4,7 @@
 "use strict";
 require("colors").enabled = true; //for console output; https://github.com/Marak/colors.js/issues/127
 //const JSON5 = require("json5");
-const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
+const {debug, warn, error, objclone, CLI} = require("./dsl.js");
 //console.error("CLI", typeof CLI, CLI);
 
 
@@ -14,17 +14,20 @@ const {debug, warn, error, AstNode, CLI} = require("./dsl.js");
 //
 
 //TODO: move some of this logic into dsl #include file?
-function process_node(ast_node, /*state,*/ opts)
+function process_node(ast_node, /*state,*/ parent, root, opts)
 {
 //    opts = process_node.opts; //kludge; get from caller
-    if (opts.no_codegen) return; //false; //not interested
-    if (!ast_node.uid) error(`unknown ast node: ${JSON.stringify(ast_node, show_object_placeholder)}`);
+    if (!opts.codegen) return; //false; //not interested
+    opts.opcodes || (opts.opcodes = []);
+    if (!ast_node.uid) error(`unknown ast node: ${JSON.stringify(objclone(ast_node, 1))}`); //, show_object_placeholder)}`);
 //    if (!ast_node) return;
     switch (ast_node.type)
     {
         case "VariableDeclarator": //{type, id, init{}, kind-inherited}
 //            traverse(ast_node.init, symtab);
-            break;
+//            parent ${(parent || {}).type || `ary-${(parent || []).length}`}`.blue_lt, JSON.stringify(objclone(ast_node, 1)).blue_lt);
+            opts.opcodes.push(`\tvar ${ast_node.id.name}; //kind ${ast_node.kind}, uid ${ast_node.uid}, parent ${(parent || {}).uid || "NONE"}, scope ${ast_node.which_scope}`.blue_lt);
+            return;
 //don't care about these ones:
         case "CallExpression": //{type, callee{}, arguments[]}
 //            (ast_node.arguments || []).forEach((arg, inx, all) => { traverse(arg, symtab); });
@@ -127,12 +130,14 @@ function process_node(ast_node, /*state,*/ opts)
         case "Literal" : //{type, value, raw}
 //            break;
 //            debug("PIC8-ignore", JSON.stringify({type: ast_node.type, uid: ast_node.uid}).blue_lt);
-            return; //true; //quietly ignore ast node, but continue processing
+            break; //true; //quietly ignore ast node, but continue processing
         default: //for debug
-            /*throw*/ error(`PIC8-DSL node evt: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(ast_node.parent || {}).type}', node ${JSON.stringify(ast_node, null, 2)}`.red_lt);
+            /*throw*/ error(`PIC8-DSL node evt: unhandled node type '${`${ast_node.type}`.cyan_lt}', parent type '${(parent || {}).type}', node ${JSON.stringify(objclone(ast_node, 2), null, 2)}`.red_lt);
+            return;
     }
-    if (opts.debug)
-    {
+    debug(`PIC8: ignore type ${ast_node.type}, node ${ast_node.uid}, parent ${ast_node.parent_uid}`.blue_lt);
+//    if (opts.debug)
+//    {
 //no        const node = AstNode(ast_node);
 //        Object.keys(node).forEach((key) =>
 //        {
@@ -141,15 +146,15 @@ function process_node(ast_node, /*state,*/ opts)
 //no; don't change node data                    if (typeof node[key][k] == "object") node[key][k] = `[${k.toUpperCase()}]`;
 //                    else if()
 //        }); //reduce clutter
-        function show_object_placeholder(key, value) //this[key] === value
-        {
-            return (typeof value != "object")? value:
-                (key == "id")? `[${value.name || "ID"}]`:
-                key? `[${key.toUpperCase()}]`:
-                value;
-        }
-        debug("PIC8", `parent ${(ast_node.parent || {}).type || `ary-${(ast_node.parent || []).length}`}`.blue_lt, JSON.stringify(ast_node, show_object_placeholder).blue_lt);
-    }
+//        function show_object_placeholder(key, value) //this[key] === value
+//        {
+//            return (typeof value != "object")? value:
+//                (key == "id")? `[${value.name || "ID"}]`:
+//                key? `[${key.toUpperCase()}]`:
+//                value;
+//        }
+//        debug(`PIC8 node: parent ${(parent || {}).type || `ary-${(parent || []).length}`}`.blue_lt, JSON.stringify(objclone(ast_node, 1)).blue_lt);
+//    }
 //    return ast_node;
 //    return true; //continue processing
 }
@@ -171,17 +176,37 @@ const pic8_CLI =
 module.exports.CLI =
 function pic8_CLI(opts)
 {
-    const state = {};
+//    debug("opts", JSON.stringify(opts));
+//    const state = {};
 //    opts = opts || {};
+//    if (opts.codegen) opts.codegen = {};
     return CLI(Object.assign({}, my_opts, opts || {})) //caller opts override my defaults
 //        .on("dsl-opts", (opts) => { console.log(JSON5.stringify(opts).green_lt); my_CLI.save_opts = opts; })
-        .on("ast-node", (node_data) => process_node(node_data, CLI.opts)); //my_CLI.save_opts); });
+        .on("ast-node", (node_data, parent, root) => process_node(node_data, parent, root, CLI.opts)) //my_CLI.save_opts); });
 //        .on("ast-node", (node_data_wrapper) => { node_data_wrapper.wanted = process_node(node_data_wrapper.ast_node, state, CLI.opts); }); //my_CLI.save_opts); });
 //        {
 //            if (!opts.codegen) return;
 //            (data.children || []).forEach((key) => { key = key.replace("[]", ""); if (data[key]) data[key] = key.toUpperCase(); });
 //            console.log(JSON5.stringify(data).cyan_lt);
 //        });
+        .on("finish", () => eof("finish"))
+        .on("close", () => eof("close"))
+        .on("done", () => eof("done"))
+        .on("end", () => eof("end"))
+        .on("error", err => { eof(`ERROR ${err}`.red_lt); process.exit(); });
+//    debug("DSL engine: finish asynchronously".green_lt);
+//    retstrm.emit("dsl-opts", opts);
+//console.error(typeof retstrm);
+//    return retstrm;
+
+        function eof(why)
+        {
+//        CaptureConsole.stopCapture(process.stdout);
+            debug(`${__file} stream: ${why || "eof"}`.green_lt);
+            debug(`${CLI.opts.opcodes.length} opcodes:\n${CLI.opts.opcodes.join("\n")}`.cyan_lt);
+//            console.error(`${warn.count || 0} warnings`.yellow_lt);
+//            console.error(`${error.count} errors`.red_lt);
+        }
 //console.error(typeof retval);
 //    return retval
 }

@@ -52,6 +52,9 @@ const PIC/*16F1827*/ = new PIC8X(
 //#endif
     get clock() { return this.max_freq; }, //default max speed
 });
+debug(typeof PIC, `PIC object defined`);
+//debug(JSON.stringify(vm.runInThisContext("PIC")));
+debug(JSON.stringify(vm.runInNewContext("PIC", {PIC})));
 
 
 //register addresses:

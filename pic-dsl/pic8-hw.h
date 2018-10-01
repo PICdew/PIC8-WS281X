@@ -103,6 +103,8 @@ function MPU(opts)
         }
     }
 }
+//debug(typeof MPU, `MPU class defined`);
+//debug(JSON.stringify(vm.runInNewContext("MPU()", {MPU})));
 
 
 //registers:
