@@ -18,7 +18,7 @@ function process_node(ast_node, /*state,*/ parent, root, opts)
 {
 //    opts = process_node.opts; //kludge; get from caller
     if (!opts.codegen) return; //false; //not interested
-    opts.opcodes || (opts.opcodes = []);
+//    opts.opcodes || (opts.opcodes = []);
     if (!ast_node.uid) error(`unknown ast node: ${JSON.stringify(objclone(ast_node, 1))}`); //, show_object_placeholder)}`);
 //    if (!ast_node) return;
     switch (ast_node.type)
@@ -170,6 +170,8 @@ const my_opts =
 {
     pic8: true,
 //    traverse: process_ast,
+    opcodes: [],
+//    opts.opcodes || (opts.opcodes = []);
 };
 
 const pic8_CLI =

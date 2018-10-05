@@ -22,7 +22,7 @@
 
 
 //overall device (memory + clock):
-//use function-style ctors to allow call without "new" or private scoped vars
+//use function-style ctors to allow private scoped vars or call without "new"
 //class MPU
 function MPU(opts)
 {
@@ -36,7 +36,7 @@ function MPU(opts)
 //debug(JSON.stringify(opts));
 //debugger;
         this.opts = parentify(Object.assign({}, opts || {})); //, null, "parent_reg"); //shallow copy, add parent refs
-        defaults.call(this);
+        this.defaults();
 //console.error("mpu here3");
 //console.error(JSON.stringify(this.opts));
 //console.error(`this is a ${typeof this}, ${this.constructor.name}, is MPU? ${this instanceof MPU}`);
@@ -91,17 +91,17 @@ function MPU(opts)
         debug(`TODO: check clock ${this.opts.clock}`.red_lt);
     }
 
-    [constructor, chklen, chkbank, chkclock].forEach((method) => { this[method.name] = method; }); //copy nested functions to instance object
-    this.constructor(opts);
-
     function defaults()
     {
         if (!this.opts.clock)
         {
-            this.opts.clock = this.opts.clock || (this.opts.max_intosc || 8 MHz) * (this.opts.PLL || 1);
+            this.opts.clock || (this.opts.clock = (this.opts.max_intosc || 8 MHz) * (this.opts.PLL || 1));
             warn(`setting clock to max freq ${this.opts.clock.toString().replace(/000000/, " MHz").replace(/000/, " KHz")}`);
         }
     }
+
+    [constructor, chklen, chkbank, chkclock, defaults].forEach((method) => { this[method.name] = method; }); //copy nested functions to instance object
+    this.constructor(opts);
 }
 //debug(typeof MPU, `MPU class defined`);
 //debug(JSON.stringify(vm.runInNewContext("MPU()", {MPU})));

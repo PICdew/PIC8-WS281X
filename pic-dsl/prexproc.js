@@ -1390,6 +1390,49 @@ function str2strm(str)
 
 /////////////////////////////////////////////////////////////////////////////////
 ////
+/// Object extensions/helpers:
+//
+
+/*
+function obj_forEach(obj, cb, thisobj)
+{
+    Object.keys(obj).forEach((key) => cb.call(thisobj, this[key], key, this), thisobj); //CAUTION: val before key (inx)
+}
+
+if (!Object.prototype.forEach)
+Object.defineProperty(Object.prototype, "forEach",
+{
+    value: function(cb, thisobj)
+    {
+        Object.keys(this).forEach((key) => cb.call(thisobj, this[key], key, this)); //CAUTION: val before key (inx)
+    },
+});
+if (!Object.prototype.map)
+Object.defineProperty(Object.prototype, "map",
+{
+    value: function(cb, thisobj)
+    {
+        const retval = {};
+//                Object.keys(this).forEach((key) => retval[key] = cb.call(thisobj, this[key], key, this));
+        this.forEach((val, key) => retval[key] = cb.call(thisobj, val, key, this));
+        return retval;
+    },
+});
+if (!Object.prototype.join)
+Object.defineProperty(Object.prototype, "join",
+{
+    value: function(sep)
+    {
+        const retval = [];
+//                Object.keys(this).forEach((key) => retval.push(this[key]));
+        this.forEach((val, key) => retval.push(val));
+        return retval.join(sep);
+    },
+*/
+
+
+/////////////////////////////////////////////////////////////////////////////////
+////
 /// Misc extensions/helpers:
 //
 
@@ -1479,6 +1522,56 @@ function extensions()
 //    if (!debug) debug = function(args) { console.error.apply(console, Array.from(arguments).push_fluent(__srcline)); } //in case debug() not defined yet
 //magic globals:
     Object.defineProperty(global, '__srcline', { get: function() { return srcline(1); }, });
+    Object.defineProperty(global, '__parent_srcline', { get: function() { return srcline(2); }, });
+//object:
+//CAUTION: define values rather than functions; see https://gomakethings.com/looping-through-objects-with-es6/
+//    Object.prototype.forEachKey = function() { return Object.keys(this).forEach.apply(this, arguments); }
+    if (!Object.prototype.forEach)
+        Object.defineProperty(Object.prototype, "forEach", //{ value: obj_forEach.bind(this), });
+        {
+            value: function(cb, thisobj)
+            {
+                Object.keys(this).forEach((key) => cb.call(thisobj, this[key], key, this)); //CAUTION: val before key (inx)
+            },
+        });
+    if (!Object.prototype.some)
+        Object.defineProperty(Object.prototype, "some",
+        {
+            value: function(cb, thisobj)
+            {
+                return Object.keys(this).some((key) => cb.call(thisobj, this[key], key, this)); //CAUTION: val before key (inx)
+            },
+        });
+    if (!Object.prototype.every)
+        Object.defineProperty(Object.prototype, "every",
+        {
+            value: function(cb, thisobj)
+            {
+                return Object.keys(this).every((key) => cb.call(thisobj, this[key], key, this)); //CAUTION: val before key (inx)
+            },
+        });
+    if (!Object.prototype.map)
+        Object.defineProperty(Object.prototype, "map",
+        {
+            value: function(cb, thisobj)
+            {
+                const retval = {};
+//                Object.keys(this).forEach((key) => retval[key] = cb.call(thisobj, this[key], key, this));
+                this.forEach((val, key) => retval[key] = cb.call(thisobj, val, key, this));
+                return retval;
+            },
+        });
+    if (!Object.prototype.join)
+        Object.defineProperty(Object.prototype, "join",
+        {
+            value: function(sep)
+            {
+                const retval = [];
+//                Object.keys(this).forEach((key) => retval.push(this[key]));
+                this.forEach((val, key) => retval.push(val));
+                return retval.join(sep);
+            },
+        });
 //Array:
     [plurals, plurales, join_flush, push_fluent, pop_fluent, shift_fluent, unshift_fluent, splice_fluent].forEach((method) =>
     {
@@ -1563,6 +1656,7 @@ function extensions()
     debug("is quoted?", !!is_quostr(` "quoted" `), !!is_quostr(`"hi" + "bye"`));
     debug("quoted".quoted, '"unquoted1"'.unquoted, "'unquoted2'".unquoted);
     debug(" ( hello ) ".unparen, "anchor".anchorRE, "space".spaceRE);
+    debug("obj.forEach", {a: 11, b: 22, 33: "c"}.forEach((item, key) => `key ${key} = val ${item}`).join(", "));
 //    debug(["leader".blue_lt, "intro", "red".red_lt, "more", "green".green_lt, "trailer"].join(" ").color_reset, "hello");
 //    debug(["intro", "red".red_lt, "more", "green".green_lt, "trailer"].join(" ").color_reset, "hello");
 //    debug(color_reset(["intro", "red".red_lt, "more", "green".green_lt, "trailer"].join(" "), "".pink_lt), "hello");
